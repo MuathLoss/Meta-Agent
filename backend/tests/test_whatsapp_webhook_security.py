@@ -14,8 +14,11 @@ from app.services.tenant_channel_service import TenantChannelService
 
 class FakeRequest:
     def __init__(self, payload: dict, headers: dict | None = None):
+        from types import SimpleNamespace
+
         self._body = json.dumps(payload).encode("utf-8")
         self.headers = headers or {}
+        self.client = SimpleNamespace(host="127.0.0.1")
 
     async def body(self) -> bytes:
         return self._body
@@ -219,6 +222,7 @@ def test_dashboard_preview_inbound_still_works(db, tenant, monkeypatch):
 
     result = preview(
         payload=type("Payload", (), {"customer_phone": "0500000000", "text": "السلام", "channel_type": "whatsapp"})(),
+        request=FakeRequest({}),
         db=db,
         tenant=tenant,
         _={},

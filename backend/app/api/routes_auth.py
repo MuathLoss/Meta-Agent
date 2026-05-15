@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.core.db import get_db
+from app.core.rate_limit import client_ip, enforce_rate_limit, normalized_identifier
 from app.core.security import create_access_token, create_refresh_token, hash_password, verify_password
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, get_current_tenant, get_current_user, require_tenant_roles
 from app.models.entities import (
@@ -30,6 +31,10 @@ from app.models.entities import (
 from app.schemas.auth import DeleteAccountRequest, LoginRequest, SignupBusinessRequest, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+LOGIN_RATE_LIMIT_MAX = 10
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = 300
+SIGNUP_RATE_LIMIT_MAX = 5
+SIGNUP_RATE_LIMIT_WINDOW_SECONDS = 3600
 
 
 def delete_local_logo_file(logo_url: str | None) -> None:
@@ -58,7 +63,12 @@ def resolve_login_tenant_slug(requested_slug: str | None, memberships_list: list
     return match["tenant_slug"]
 
 @router.post("/signup-business", response_model=TokenResponse)
-def signup(payload: SignupBusinessRequest, db: Session = Depends(get_db)):
+def signup(payload: SignupBusinessRequest, request: Request, db: Session = Depends(get_db)):
+    enforce_rate_limit(
+        f"auth:signup:{client_ip(request)}",
+        max_requests=SIGNUP_RATE_LIMIT_MAX,
+        window_seconds=SIGNUP_RATE_LIMIT_WINDOW_SECONDS,
+    )
     if db.query(Tenant).filter(Tenant.slug == payload.tenant_slug).first():
         raise HTTPException(status_code=409, detail="Tenant slug is already used")
     if db.query(User).filter(User.email == str(payload.admin_email).lower()).first():
@@ -76,7 +86,12 @@ def signup(payload: SignupBusinessRequest, db: Session = Depends(get_db)):
     return TokenResponse(access_token=create_access_token(str(user.id), claims), refresh_token=create_refresh_token(str(user.id), claims), user={"id": user.id, "email": user.email, "full_name": user.full_name, "is_platform_admin": user.is_platform_admin}, memberships=memberships(db, user))
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    enforce_rate_limit(
+        f"auth:login:{client_ip(request)}:{normalized_identifier(payload.email)}",
+        max_requests=LOGIN_RATE_LIMIT_MAX,
+        window_seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    )
     user = db.query(User).filter(User.email == str(payload.email).lower()).first()
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")

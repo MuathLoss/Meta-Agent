@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.rate_limit import client_ip, enforce_rate_limit
 from app.core.tenancy import (
     ROLE_BUSINESS_ADMIN,
     ROLE_CERTIFICATES,
@@ -21,6 +22,8 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 orchestrator = ConversationOrchestrator()
 customer_identity = CustomerChannelIdentityService()
 ROLES = (ROLE_BUSINESS_ADMIN, ROLE_OPERATIONS_STAFF, ROLE_FINANCE, ROLE_CERTIFICATES, ROLE_SUPERVISOR)
+PREVIEW_RATE_LIMIT_MAX = 60
+PREVIEW_RATE_LIMIT_WINDOW_SECONDS = 60
 
 
 class PreviewInboundRequest(BaseModel):
@@ -147,5 +150,12 @@ def summary(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_
 
 
 @router.post("/preview/inbound")
-def preview(payload: PreviewInboundRequest, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(*ROLES))):
+def preview(payload: PreviewInboundRequest, request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(*ROLES))):
+    user = _.get("user") if isinstance(_, dict) else None
+    identity = f"user:{user.id}:tenant:{tenant.id}" if user is not None else f"ip:{client_ip(request)}:tenant:{tenant.id}"
+    enforce_rate_limit(
+        f"dashboard:preview:{identity}",
+        max_requests=PREVIEW_RATE_LIMIT_MAX,
+        window_seconds=PREVIEW_RATE_LIMIT_WINDOW_SECONDS,
+    )
     return {"decision": orchestrator.handle_inbound(db, tenant=tenant, customer_phone=payload.customer_phone, text=payload.text, channel_type=payload.channel_type, provider_message_id=None, payload_json={"source": "dashboard_preview"})}

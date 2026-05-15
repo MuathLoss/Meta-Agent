@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db import get_db
+from app.core.rate_limit import client_ip, enforce_rate_limit
 from app.models.entities import ChannelConfig, Tenant, WebhookEvent
 from app.services.orchestrator import ConversationOrchestrator
 from app.services.telegram_adapter import TelegramAdapter
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_CHANNEL_STATUSES = {"configured", "connected", "active", "not_connected"}
 WEBHOOK_DEV_ENVS = {"development", "dev", "test", "testing", "local"}
+WEBHOOK_RATE_LIMIT_MAX = 120
+WEBHOOK_RATE_LIMIT_WINDOW_SECONDS = 60
 
 
 class AmbiguousChannelResolution(Exception):
@@ -128,6 +131,11 @@ def verify(
 
 @router.post("/channels/whatsapp/webhook")
 async def receive(request: Request, db: Session = Depends(get_db)):
+    enforce_rate_limit(
+        f"webhook:whatsapp:{client_ip(request)}",
+        max_requests=WEBHOOK_RATE_LIMIT_MAX,
+        window_seconds=WEBHOOK_RATE_LIMIT_WINDOW_SECONDS,
+    )
     raw_body = await request.body()
     try:
         payload = json.loads(raw_body.decode("utf-8"))
@@ -177,6 +185,11 @@ async def receive(request: Request, db: Session = Depends(get_db)):
 
 
 async def _receive_telegram(request: Request, db: Session, bot_token: str | None = None):
+    enforce_rate_limit(
+        f"webhook:telegram:{client_ip(request)}",
+        max_requests=WEBHOOK_RATE_LIMIT_MAX,
+        window_seconds=WEBHOOK_RATE_LIMIT_WINDOW_SECONDS,
+    )
     raw_body = await request.body()
     try:
         payload = json.loads(raw_body.decode("utf-8"))

@@ -15,7 +15,15 @@ from app.models.entities import (
     RoutingRule,
     Tenant,
 )
+from app.core.rate_limit import reset_rate_limits
 from app.services.tenant_channel_service import TenantChannelService
+
+
+@pytest.fixture(autouse=True)
+def clear_rate_limits():
+    reset_rate_limits()
+    yield
+    reset_rate_limits()
 
 
 @pytest.fixture()

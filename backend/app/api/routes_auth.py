@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.rate_limit import client_ip, enforce_rate_limit, normalized_identifier
-from app.core.security import create_access_token, create_refresh_token, hash_password, verify_password
+from app.core.security import create_access_token, hash_password, verify_password
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, get_current_tenant, get_current_user, require_tenant_roles
 from app.models.entities import (
     AuditLog,
@@ -83,7 +83,7 @@ def signup(payload: SignupBusinessRequest, request: Request, db: Session = Depen
         db.add(ChannelConfig(tenant_id=tenant.id, channel_type=channel, status=status, public_config_json={"enabled": channel == "whatsapp"}))
     db.commit()
     claims = {"tenant_slug": tenant.slug, "is_platform_admin": False}
-    return TokenResponse(access_token=create_access_token(str(user.id), claims), refresh_token=create_refresh_token(str(user.id), claims), user={"id": user.id, "email": user.email, "full_name": user.full_name, "is_platform_admin": user.is_platform_admin}, memberships=memberships(db, user))
+    return TokenResponse(access_token=create_access_token(str(user.id), claims), user={"id": user.id, "email": user.email, "full_name": user.full_name, "is_platform_admin": user.is_platform_admin}, memberships=memberships(db, user))
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
@@ -98,7 +98,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     m = memberships(db, user)
     slug = resolve_login_tenant_slug(payload.tenant_slug, m)
     claims = {"tenant_slug": slug, "is_platform_admin": user.is_platform_admin}
-    return TokenResponse(access_token=create_access_token(str(user.id), claims), refresh_token=create_refresh_token(str(user.id), claims), user={"id": user.id, "email": user.email, "full_name": user.full_name, "is_platform_admin": user.is_platform_admin}, memberships=m)
+    return TokenResponse(access_token=create_access_token(str(user.id), claims), user={"id": user.id, "email": user.email, "full_name": user.full_name, "is_platform_admin": user.is_platform_admin}, memberships=m)
 
 @router.get("/me")
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):

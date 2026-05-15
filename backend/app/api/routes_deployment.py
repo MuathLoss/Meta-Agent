@@ -25,7 +25,6 @@ class EnvItem:
 PLATFORM_ENV_ITEMS = [
     EnvItem("APP_ENV", "development / staging / production mode"),
     EnvItem("APP_SECRET_KEY", "JWT signing secret", True),
-    EnvItem("JWT_REFRESH_SECRET_KEY", "refresh-token signing secret", True),
     EnvItem("DATABASE_URL", "PostgreSQL connection string", True),
     EnvItem("CORS_ALLOWED_ORIGINS", "allowed frontend origins"),
     EnvItem("FRONTEND_URL", "deployed frontend URL"),

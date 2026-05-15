@@ -6,9 +6,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     app_secret_key: str
-    jwt_refresh_secret_key: str
     access_token_expire_minutes: int = 60
-    refresh_token_expire_minutes: int = 10080
     database_url: str
     cors_allowed_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     frontend_url: str = "http://127.0.0.1:5173"

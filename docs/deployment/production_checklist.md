@@ -16,7 +16,6 @@ Allowed platform env values:
 
 - `APP_ENV`
 - `APP_SECRET_KEY`
-- `JWT_REFRESH_SECRET_KEY`
 - `DATABASE_URL`
 - `CORS_ALLOWED_ORIGINS`
 - `FRONTEND_URL`

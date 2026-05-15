@@ -1,7 +1,7 @@
 export type Membership = { tenant_id: number; tenant_slug: string; tenant_name: string; roles: string[] };
 export type SessionState = {
   access_token: string;
-  refresh_token: string;
+  token_type: string;
   user: { id: number; email: string; full_name: string; is_platform_admin: boolean };
   memberships: Membership[];
 };

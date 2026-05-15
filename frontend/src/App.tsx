@@ -11,18 +11,28 @@ function resolveSessionTenantSlug(session: SessionState, submittedSlug: string) 
   return session.memberships[0]?.tenant_slug || normalized || 'sarh-almarifah';
 }
 
+export function accessTokenSession(session: SessionState): SessionState {
+  return {
+    access_token: session.access_token,
+    token_type: session.token_type || 'bearer',
+    user: session.user,
+    memberships: session.memberships,
+  };
+}
+
 export default function App() {
   const [session, setSession] = useState<SessionState | null>(() => {
     const raw = localStorage.getItem('session');
-    return raw ? JSON.parse(raw) as SessionState : null;
+    return raw ? accessTokenSession(JSON.parse(raw) as SessionState) : null;
   });
   const [tenantSlug, setTenantSlug] = useState(() => localStorage.getItem('tenantSlug') || 'sarh-almarifah');
 
   function handleLogin(s: SessionState, submittedSlug: string) {
+    const accessOnlySession = accessTokenSession(s);
     const resolvedSlug = resolveSessionTenantSlug(s, submittedSlug);
-    localStorage.setItem('session', JSON.stringify(s));
+    localStorage.setItem('session', JSON.stringify(accessOnlySession));
     localStorage.setItem('tenantSlug', resolvedSlug);
-    setSession(s);
+    setSession(accessOnlySession);
     setTenantSlug(resolvedSlug);
   }
 

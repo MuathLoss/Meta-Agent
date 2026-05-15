@@ -21,12 +21,6 @@ def create_access_token(subject: str, claims: dict[str, Any] | None = None) -> s
     payload.update(claims or {})
     return jwt.encode(payload, settings.app_secret_key, algorithm="HS256")
 
-def create_refresh_token(subject: str, claims: dict[str, Any] | None = None) -> str:
-    now = datetime.now(timezone.utc)
-    payload: dict[str, Any] = {"sub": subject, "type": "refresh", "iat": int(now.timestamp()), "exp": now + timedelta(minutes=settings.refresh_token_expire_minutes)}
-    payload.update(claims or {})
-    return jwt.encode(payload, settings.jwt_refresh_secret_key, algorithm="HS256")
-
 def get_token_payload(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> dict[str, Any]:
     if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")

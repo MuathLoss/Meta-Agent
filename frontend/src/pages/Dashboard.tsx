@@ -497,7 +497,7 @@ function RuntimeChatPreview({ message, analysis }: { message: string; analysis: 
       </div>
       <div className="mini-chat-bubble inbound">
         <small>Assistant route</small>
-        <p>{action.replaceAll('_', ' ')}</p>
+        <p>{action.replace(/_/g, ' ')}</p>
       </div>
     </div>
     <div className="mini-chat-meta">

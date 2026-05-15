@@ -78,4 +78,5 @@ def test_reply_to_conversation_uses_telegram_delivery_identity(db, tenant):
 
     row = db.query(Message).filter(Message.tenant_id == tenant.id, Message.id == result["message_id"]).one()
     assert row.payload_json["channel_type"] == "telegram"
-    assert row.payload_json["destination"] == "99887766"
+    assert row.payload_json["provider"] == "telegram"
+    assert "destination" not in row.payload_json

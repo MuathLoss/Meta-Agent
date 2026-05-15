@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from uuid import uuid4
+
+import httpx
 from sqlalchemy.orm import Session
+
+from app.core.redaction import redact_sensitive
 from app.models.entities import ChannelConfig, Message
 from app.services.tenant_channel_service import TenantChannelService
 from app.services.telegram_adapter import TelegramAdapter
@@ -85,6 +89,8 @@ class OutboundService:
             return False
         if str(payload.get("send_status")) != "send_failed":
             return False
+        if payload.get("error_type") == "recipient_unreachable":
+            return True
         error = str(payload.get("error") or "").lower()
         return any(fragment in error for fragment in [
             "chat not found",
@@ -93,6 +99,56 @@ class OutboundService:
             "forbidden",
             "have no rights to send a message",
         ])
+
+    def success_payload(self, dispatched: OutboundDispatchResult) -> dict:
+        payload = {
+            "send_status": dispatched.send_status,
+            "provider": dispatched.channel_type,
+            "channel_type": dispatched.channel_type,
+        }
+        if dispatched.provider_message_id:
+            payload["provider_message_id"] = dispatched.provider_message_id
+        return payload
+
+    def failure_payload(self, *, channel_type: str, exc: Exception) -> dict:
+        error_type = "provider_send_error"
+        safe_error_code: str | None = None
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if isinstance(exc, httpx.TimeoutException):
+            error_type = "provider_timeout"
+        elif isinstance(exc, httpx.NetworkError):
+            error_type = "provider_network_error"
+        elif status_code is not None:
+            safe_error_code = f"http_{status_code}"
+            if status_code == 429:
+                error_type = "provider_rate_limited"
+            elif status_code in {401, 403}:
+                error_type = "provider_auth_or_permission_error"
+            elif 400 <= int(status_code) < 500:
+                error_type = "provider_rejected_request"
+            else:
+                error_type = "provider_http_error"
+
+        lowered = str(exc).lower()
+        if channel_type == "telegram" and any(fragment in lowered for fragment in [
+            "chat not found",
+            "bot was blocked by the user",
+            "user is deactivated",
+            "forbidden",
+            "have no rights to send a message",
+        ]):
+            error_type = "recipient_unreachable"
+
+        payload = {
+            "send_status": "send_failed",
+            "provider": channel_type,
+            "channel_type": channel_type,
+            "error_type": error_type,
+        }
+        if safe_error_code:
+            payload["safe_error_code"] = safe_error_code
+        return payload
 
     def dispatch_via_channel(self, *, channel: ChannelConfig, destination: str, text: str) -> OutboundDispatchResult:
         public_config = channel.public_config_json or {}
@@ -141,7 +197,7 @@ class OutboundService:
             direction="outbound",
             provider_message_id=f"local-{uuid4()}",
             text=text,
-            payload_json=payload_json or {"send_status": "local_preview"},
+            payload_json=redact_sensitive(payload_json or {"send_status": "local_preview"}),
             intent_code=intent_code,
         )
         db.add(row)
@@ -151,7 +207,7 @@ class OutboundService:
     def send_or_store(self, db: Session, *, tenant_id: int, conversation_id: int, channel_type: str, destination: str, text: str, intent_code: str | None) -> Message:
         channel = db.query(ChannelConfig).filter(ChannelConfig.tenant_id == tenant_id, ChannelConfig.channel_type == channel_type).first()
         if not channel:
-            return self.store_local_outbound(db, tenant_id=tenant_id, conversation_id=conversation_id, text=text, intent_code=intent_code, payload_json={"send_status": "no_adapter", "channel_type": channel_type})
+            return self.store_local_outbound(db, tenant_id=tenant_id, conversation_id=conversation_id, text=text, intent_code=intent_code, payload_json={"send_status": "no_adapter", "provider": channel_type, "channel_type": channel_type})
 
         ready, reason = self.channel_ready(channel)
         if not ready:
@@ -161,7 +217,7 @@ class OutboundService:
                 conversation_id=conversation_id,
                 text=text,
                 intent_code=intent_code,
-                payload_json={"send_status": "stored_only", "reason": reason, "channel_type": channel_type, "destination": destination},
+                payload_json={"send_status": "stored_only", "reason": reason, "provider": channel_type, "channel_type": channel_type},
             )
 
         try:
@@ -172,18 +228,13 @@ class OutboundService:
                 direction="outbound",
                 provider_message_id=dispatched.provider_message_id or f"local-{uuid4()}",
                 text=text,
-                payload_json={
-                    "send_status": dispatched.send_status,
-                    "provider_response": dispatched.provider_response,
-                    "channel_type": dispatched.channel_type,
-                    "destination": destination,
-                },
+                payload_json=redact_sensitive(self.success_payload(dispatched)),
                 intent_code=intent_code,
             )
             db.add(row)
             db.flush()
             return row
         except Exception as exc:
-            return self.store_local_outbound(db, tenant_id=tenant_id, conversation_id=conversation_id, text=text, intent_code=intent_code, payload_json={"send_status": "send_failed", "error": str(exc), "channel_type": channel_type, "destination": destination})
+            return self.store_local_outbound(db, tenant_id=tenant_id, conversation_id=conversation_id, text=text, intent_code=intent_code, payload_json=self.failure_payload(channel_type=channel_type, exc=exc))
 
-        return self.store_local_outbound(db, tenant_id=tenant_id, conversation_id=conversation_id, text=text, intent_code=intent_code, payload_json={"send_status": "no_adapter", "channel_type": channel_type, "destination": destination})
+        return self.store_local_outbound(db, tenant_id=tenant_id, conversation_id=conversation_id, text=text, intent_code=intent_code, payload_json={"send_status": "no_adapter", "provider": channel_type, "channel_type": channel_type})

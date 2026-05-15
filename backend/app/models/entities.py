@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -126,11 +126,25 @@ class TrainingExample(Base, TimeMixin):
 
 class ChannelConfig(Base, TimeMixin):
     __tablename__ = "channel_configs"
-    __table_args__ = (UniqueConstraint("tenant_id", "channel_type", name="uq_channel_tenant_type"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "channel_type", name="uq_channel_tenant_type"),
+        Index(
+            "uq_channel_configs_type_provider_channel_id",
+            "channel_type",
+            "provider_channel_id",
+            unique=True,
+            postgresql_where=text("provider_channel_id IS NOT NULL"),
+            sqlite_where=text("provider_channel_id IS NOT NULL"),
+        ),
+        Index("ix_channel_configs_tenant_type_provider_channel", "tenant_id", "channel_type", "provider_channel_id"),
+        Index("ix_channel_configs_type_status_provider_channel", "channel_type", "status", "provider_channel_id"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     channel_type: Mapped[str] = mapped_column(String(80))
     status: Mapped[str] = mapped_column(String(40), default="not_connected")
+    provider_channel_id: Mapped[str | None] = mapped_column(String(255))
+    provider_account_id: Mapped[str | None] = mapped_column(String(255))
     public_config_json: Mapped[dict] = mapped_column(JSON, default=dict)
     encrypted_credentials: Mapped[str | None] = mapped_column(Text)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

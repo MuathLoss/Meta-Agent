@@ -12,7 +12,7 @@ def test_alembic_has_one_head_and_metadata_loads():
     config = Config(str(backend_dir / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["20260515_0005"]
+    assert script.get_heads() == ["20260515_0006"]
     assert len(Base.metadata.tables) == 20
     assert "tenants" in Base.metadata.tables
     assert "webhook_events" in Base.metadata.tables
@@ -147,3 +147,49 @@ def test_tenant_composite_relationship_revision_follows_webhook_uniqueness():
     assert "idf.id IS NULL" in source
     assert source.count("op.drop_constraint(name, source_table, type_=\"foreignkey\")") == 1
     assert source.count("op.drop_constraint(name, table_name, type_=\"unique\")") == 1
+
+
+def test_channel_config_routing_keys_revision_follows_composite_relationships():
+    backend_dir = Path(__file__).resolve().parents[1]
+    revision_path = backend_dir / "migrations" / "versions" / "20260515_0006_channel_config_routing_keys.py"
+    source = revision_path.read_text()
+    spec = spec_from_file_location("channel_config_routing_keys_revision", revision_path)
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.revision == "20260515_0006"
+    assert module.down_revision == "20260515_0005"
+    assert '"provider_channel_id"' in source
+    assert '"provider_account_id"' in source
+    assert "public_config_json ->> 'phone_number_id'" in source
+    assert "public_config_json ->> 'waba_id'" in source
+    assert "encrypted_credentials" not in source
+    assert "uq_channel_configs_type_provider_channel_id" in source
+    assert 'postgresql_where=sa.text("provider_channel_id IS NOT NULL")' in source
+    assert {name for name, _columns, _unique in module.ROUTING_INDEXES} == {
+        "uq_channel_configs_type_provider_channel_id",
+        "ix_channel_configs_tenant_type_provider_channel",
+        "ix_channel_configs_type_status_provider_channel",
+    }
+
+
+def test_channel_config_model_has_routing_key_columns_and_indexes():
+    table = Base.metadata.tables["channel_configs"]
+
+    assert "provider_channel_id" in table.c
+    assert "provider_account_id" in table.c
+    assert table.c.provider_channel_id.type.length == 255
+    assert table.c.provider_account_id.type.length == 255
+
+    indexes = {index.name: index for index in table.indexes}
+    assert "uq_channel_configs_type_provider_channel_id" in indexes
+    assert indexes["uq_channel_configs_type_provider_channel_id"].unique is True
+    assert [column.name for column in indexes["uq_channel_configs_type_provider_channel_id"].columns] == [
+        "channel_type",
+        "provider_channel_id",
+    ]
+    assert "ix_channel_configs_tenant_type_provider_channel" in indexes
+    assert "ix_channel_configs_type_status_provider_channel" in indexes

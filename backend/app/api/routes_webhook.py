@@ -78,14 +78,27 @@ def _resolve_telegram_channel(db: Session, token_hint: str | None) -> tuple[Chan
 
 
 def _resolve_channel_by_phone_number_id(db: Session, phone_number_id: str) -> ChannelConfig | None:
-    matches: list[ChannelConfig] = []
+    indexed_matches = (
+        db.query(ChannelConfig)
+        .filter(
+            ChannelConfig.channel_type == "whatsapp",
+            ChannelConfig.provider_channel_id == phone_number_id,
+        )
+        .all()
+    )
+    indexed_matches = [row for row in indexed_matches if _is_resolvable_channel(row)]
+    if indexed_matches:
+        return _exactly_one_channel(indexed_matches, provider="whatsapp", identifier_name="provider_channel_id")
+
+    fallback_matches: list[ChannelConfig] = []
     for row in db.query(ChannelConfig).filter(ChannelConfig.channel_type == "whatsapp").all():
         if not _is_resolvable_channel(row):
             continue
+        public_config = row.public_config_json or {}
         creds = channel_service.credentials(row)
-        if row.public_config_json.get("phone_number_id") == phone_number_id or creds.get("phone_number_id") == phone_number_id:
-            matches.append(row)
-    return _exactly_one_channel(matches, provider="whatsapp", identifier_name="phone_number_id")
+        if public_config.get("phone_number_id") == phone_number_id or creds.get("phone_number_id") == phone_number_id:
+            fallback_matches.append(row)
+    return _exactly_one_channel(fallback_matches, provider="whatsapp", identifier_name="phone_number_id")
 
 
 @router.get("/channels/whatsapp/webhook")

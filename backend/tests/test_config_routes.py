@@ -9,6 +9,7 @@ from app.api.routes_config import (
     IntentUpdate,
     RoutingRuleUpsert,
     StaffCreate,
+    TenantProfileUpdate,
     archive_faq,
     create_staff,
     create_faq,
@@ -22,6 +23,7 @@ from app.api.routes_config import (
     list_routing_rules,
     upsert_routing_rule,
     update_faq,
+    update_profile,
     update_intent,
     upload_profile_logo,
 )
@@ -464,6 +466,63 @@ def test_logo_upload_uses_generated_filename_and_does_not_audit_original_filenam
     assert audit is not None
     assert audit.details_json["stored_filename"].endswith(".png")
     assert "filename" not in audit.details_json
+
+
+def test_profile_update_rejects_unsafe_logo_urls(db, tenant):
+    unsafe_values = [
+        "https://example.test/logo.png",
+        "http://example.test/logo.png",
+        "data:image/png;base64,AAAA",
+        "javascript:alert(1)",
+        "//example.test/logo.png",
+        "/uploads/tenant_logos/test-tenant/logo.svg",
+        "/uploads/tenant_logos/test-tenant/../evil.png",
+        "/static/logo.png",
+    ]
+
+    for value in unsafe_values:
+        with pytest.raises(Exception) as exc:
+            update_profile(
+                payload=TenantProfileUpdate(logo_url=value),
+                tenant=tenant,
+                db=db,
+                ctx={"user": SimpleNamespace(id=89)},
+            )
+        assert getattr(exc.value, "status_code", None) == 400
+
+
+def test_profile_update_accepts_empty_null_and_safe_local_logo_url(db, tenant):
+    update_profile(
+        payload=TenantProfileUpdate(logo_url="/uploads/tenant_logos/test-tenant/logo.png"),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=90)},
+    )
+
+    assert update_profile(
+        payload=TenantProfileUpdate(logo_url=""),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=90)},
+    ) == {"status": "updated"}
+    assert update_profile(
+        payload=TenantProfileUpdate(logo_url=None),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=90)},
+    ) == {"status": "updated"}
+
+    for value in [
+        "/uploads/tenant_logos/test-tenant/logo.jpg",
+        "/uploads/tenant_logos/test-tenant/logo.jpeg",
+        "/uploads/tenant_logos/test-tenant/logo.webp",
+    ]:
+        assert update_profile(
+            payload=TenantProfileUpdate(logo_url=value),
+            tenant=tenant,
+            db=db,
+            ctx={"user": SimpleNamespace(id=90)},
+        ) == {"status": "updated"}
 
 
 def test_non_admin_role_dependency_blocks_logo_upload(db, tenant):

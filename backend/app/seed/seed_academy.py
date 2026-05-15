@@ -1,7 +1,13 @@
+import os
+
+from app.core.config import settings
 from app.core.crypto import encrypt_dict
 from app.core.db import SessionLocal, engine
 from app.core.security import hash_password
 from app.models.entities import Base, Branch, BusinessSetting, ChannelConfig, FaqItem, IntentDefinition, IntentKeyword, RoutingRule, Tenant, TenantBrand, TenantUserRole, User
+
+LOCAL_SEED_ENVS = {"development", "dev", "test", "testing", "local"}
+DEMO_PASSWORD = os.getenv("ACADEMY_SEED_DEMO_PASSWORD", "ChangeMe123!")
 
 INTENTS = ["GREETING","FAQ_GENERAL","REGISTRATION","PRICING","DISCOUNTS_OFFERS","SCHEDULES","LOCATION","PAYMENT_TRANSFER","COMPLAINT","HUMAN_REQUEST","CERTIFICATES","STEP_PREP","BEGINNER_ENGLISH","WOMENS_SECTION","KIDS_SECTION","ACCREDITATION","UNKNOWN"]
 TOPIC = {"GREETING":"greeting","FAQ_GENERAL":"faq_general","REGISTRATION":"registration","PRICING":"pricing","DISCOUNTS_OFFERS":"discounts_offers","SCHEDULES":"schedules","LOCATION":"location","PAYMENT_TRANSFER":"payment_transfer","COMPLAINT":"complaint","HUMAN_REQUEST":"human_request","CERTIFICATES":"certificates","STEP_PREP":"step_prep","BEGINNER_ENGLISH":"beginner_english","WOMENS_SECTION":"womens_section","KIDS_SECTION":"kids_section","ACCREDITATION":"accreditation","UNKNOWN":"faq_general"}
@@ -26,14 +32,26 @@ FAQS = {
 KEYWORDS = {"GREETING":["السلام","سلام","مرحبا","اهلا"],"REGISTRATION":["اسجل","التسجيل","ابغى اسجل","تسجيل"],"PRICING":["السعر","بكم","رسوم","الاشتراك"],"DISCOUNTS_OFFERS":["خصم","عرض","عروض"],"SCHEDULES":["متى","المواعيد","صباح","مساء","بداية الدورة"],"LOCATION":["الموقع","وين","العنوان","لوكيشن"],"PAYMENT_TRANSFER":["سداد","تحويل","دفعت","تابي"],"COMPLAINT":["شكوى","مشكلة","زعلان","استرجاع"],"HUMAN_REQUEST":["ابغى موظف","موظف","اكلم احد"],"CERTIFICATES":["شهادة","الشهادة","استلام شهادة"],"STEP_PREP":["ستيب","STEP","اختبار ستيب"],"BEGINNER_ENGLISH":["من الصفر","تأسيس","تاسيس","اتعلم انجليزي"],"WOMENS_SECTION":["قسم نسائي","نساء","بنات"],"KIDS_SECTION":["اطفال","أطفال","طفل","عمر"],"ACCREDITATION":["معتمد","اعتماد"]}
 ROUTING = {"GREETING":("BOT",[],False,None,"normal"),"FAQ_GENERAL":("BOT",["RECEPTION"],False,None,"normal"),"REGISTRATION":("RECEPTION",[],False,None,"normal"),"PRICING":("BOT",["RECEPTION"],False,None,"normal"),"DISCOUNTS_OFFERS":("RECEPTION",[],True,"offer_inquiry","normal"),"SCHEDULES":("RECEPTION",[],False,None,"normal"),"LOCATION":("BOT",[],False,None,"normal"),"PAYMENT_TRANSFER":("FINANCE",["RECEPTION"],True,"payment_transfer","normal"),"COMPLAINT":("OPERATIONS_STAFF",["SUPERVISOR"],True,"complaint","high"),"HUMAN_REQUEST":("RECEPTION",[],True,"human_request","normal"),"CERTIFICATES":("CERTIFICATES",["RECEPTION"],True,"certificate","normal"),"STEP_PREP":("RECEPTION",[],False,None,"normal"),"BEGINNER_ENGLISH":("RECEPTION",[],False,None,"normal"),"WOMENS_SECTION":("BOT",["RECEPTION"],False,None,"normal"),"KIDS_SECTION":("RECEPTION",[],False,None,"normal"),"ACCREDITATION":("BOT",[],False,None,"normal"),"UNKNOWN":("RECEPTION",[],False,None,"normal")}
 
+def ensure_local_seed_allowed() -> None:
+    if settings.app_env.strip().lower() not in LOCAL_SEED_ENVS:
+        raise RuntimeError("Academy demo seed is local/dev-only and must not run in staging or production")
+
+
+def demo_password() -> str:
+    if len(DEMO_PASSWORD) < 8:
+        raise RuntimeError("ACADEMY_SEED_DEMO_PASSWORD must be at least 8 characters")
+    return DEMO_PASSWORD
+
+
 def user(db, email, name, admin=False):
     u = db.query(User).filter(User.email == email).first()
     if not u:
-        u = User(email=email, full_name=name, password_hash=hash_password("ChangeMe123!"), is_platform_admin=admin)
+        u = User(email=email, full_name=name, password_hash=hash_password(demo_password()), is_platform_admin=admin)
         db.add(u); db.flush()
     return u
 
 def main():
+    ensure_local_seed_allowed()
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     t = db.query(Tenant).filter(Tenant.slug == "sarh-almarifah").first()
@@ -71,6 +89,7 @@ def main():
     for future in ["email","instagram","facebook","web_chat"]:
         if not db.query(ChannelConfig).filter(ChannelConfig.tenant_id == t.id, ChannelConfig.channel_type == future).first(): db.add(ChannelConfig(tenant_id=t.id, channel_type=future, status="future", public_config_json={"enabled": False}))
     db.commit(); db.close()
-    print("Seed complete: academy.admin@example.com / ChangeMe123! / X-Tenant-Slug sarh-almarifah")
+    password_hint = "ChangeMe123!" if DEMO_PASSWORD == "ChangeMe123!" else "(custom password from ACADEMY_SEED_DEMO_PASSWORD)"
+    print(f"Local demo seed complete. Local-only demo login: academy.admin@example.com / {password_hint} / X-Tenant-Slug sarh-almarifah. Never use these credentials in staging or production.")
 
 if __name__ == "__main__": main()

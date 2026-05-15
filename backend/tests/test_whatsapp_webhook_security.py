@@ -214,6 +214,42 @@ def test_telegram_webhook_path_still_works(db, tenant, monkeypatch):
     assert db.query(WebhookEvent).filter(WebhookEvent.provider == "telegram").count() == 1
 
 
+def test_telegram_token_in_path_route_is_disabled_in_production(db, monkeypatch):
+    monkeypatch.setattr(routes_webhook.settings, "app_env", "production")
+    payload = {"update_id": 1002, "message": {"chat": {"id": 99887766}, "text": "hello"}}
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(routes_webhook.receive_telegram_with_token("123:secret-token", FakeRequest(payload), db=db))
+
+    assert exc.value.status_code == 404
+    assert "123:secret-token" not in exc.value.detail
+
+
+def test_telegram_token_in_path_route_still_works_in_development(db, tenant, monkeypatch):
+    monkeypatch.setattr(routes_webhook.settings, "app_env", "development")
+    svc = TenantChannelService()
+    db.add(
+        ChannelConfig(
+            tenant_id=tenant.id,
+            channel_type="telegram",
+            status="connected",
+            public_config_json={"enabled": True},
+            encrypted_credentials=svc.encrypt_credentials({"bot_token": "123:abc"}),
+        )
+    )
+    db.commit()
+
+    def fake_handle_inbound(*args, **kwargs):
+        return {"status": "telegram-dev-stored"}
+
+    monkeypatch.setattr(routes_webhook.orchestrator, "handle_inbound", fake_handle_inbound)
+    payload = {"update_id": 1003, "message": {"chat": {"id": 99887766}, "text": "hello"}}
+
+    result = asyncio.run(routes_webhook.receive_telegram_with_token("123:abc", FakeRequest(payload), db=db))
+
+    assert result == {"ok": True, "decision": {"status": "telegram-dev-stored"}}
+
+
 def test_dashboard_preview_inbound_still_works(db, tenant, monkeypatch):
     def fake_handle_inbound(*args, **kwargs):
         return {"status": "preview-stored"}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import unquote
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -94,6 +95,29 @@ def detect_logo_type(content: bytes) -> tuple[str, str] | None:
 
 def _has_svg_filename(filename: str | None) -> bool:
     return Path(filename or "").suffix.lower() == ".svg"
+
+
+def validate_profile_logo_url(logo_url: str | None) -> str | None:
+    if logo_url is None:
+        return None
+    value = logo_url.strip()
+    if value == "":
+        return ""
+    lowered = value.lower()
+    if lowered.startswith(("data:", "javascript:", "http://", "https://", "//")):
+        raise HTTPException(status_code=400, detail="Unsupported logo URL")
+    if "\\" in value or "\x00" in value:
+        raise HTTPException(status_code=400, detail="Unsupported logo URL")
+    if not value.startswith("/uploads/tenant_logos/"):
+        raise HTTPException(status_code=400, detail="Unsupported logo URL")
+    decoded = unquote(value)
+    parts = decoded.split("/")
+    if ".." in parts or any(part == "" for part in parts[1:]):
+        raise HTTPException(status_code=400, detail="Unsupported logo URL")
+    extension = Path(decoded).suffix.lower()
+    if extension not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail="Unsupported logo URL")
+    return value
 
 
 def normalize_intent_code(code: str) -> str:
@@ -348,8 +372,10 @@ def update_profile(payload: TenantProfileUpdate, tenant: Tenant = Depends(get_cu
     brand = ensure_brand(db, tenant.id)
     for field in ["logo_url", "primary_color", "support_email", "support_phone"]:
         value = getattr(payload, field)
-        if value is not None:
-            if field == "logo_url" and value == "":
+        if value is not None or field == "logo_url" and "logo_url" in payload.model_fields_set:
+            if field == "logo_url":
+                value = validate_profile_logo_url(value)
+            if field == "logo_url" and value in {"", None}:
                 delete_local_logo_file(brand.logo_url)
             setattr(brand, field, str(value) if value is not None else None)
     audit(db, tenant.id, ctx["user"].id, "settings.profile.updated", "tenant", str(tenant.id), payload.model_dump(exclude_none=True))

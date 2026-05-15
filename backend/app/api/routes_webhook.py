@@ -239,4 +239,6 @@ async def receive_telegram(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/channels/telegram/webhook/{bot_token:path}")
 async def receive_telegram_with_token(bot_token: str, request: Request, db: Session = Depends(get_db)):
+    if settings.app_env.lower() not in WEBHOOK_DEV_ENVS:
+        raise HTTPException(status_code=404, detail="Telegram token-in-path webhook is disabled")
     return await _receive_telegram(request, db, bot_token=bot_token)

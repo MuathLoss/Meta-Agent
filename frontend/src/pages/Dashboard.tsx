@@ -834,15 +834,23 @@ function Staff({ rows, token, tenantSlug, reload }: { rows: StaffUser[]; token: 
   const staffRoleOptions = ['OPERATIONS_STAFF', 'BUSINESS_ADMIN', 'SUPERVISOR', 'FINANCE', 'CERTIFICATES'];
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
   const [roles, setRoles] = useState('OPERATIONS_STAFF');
   const [pendingDelete, setPendingDelete] = useState<StaffUser | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    await api.createStaff(token, tenantSlug, { email, full_name: name, roles: [roles] });
+    setFormError(null);
+    if (password.length < 8) {
+      setFormError('Password must be at least 8 characters.');
+      return;
+    }
+    await api.createStaff(token, tenantSlug, { email, full_name: name, password, roles: [roles] });
     setEmail('');
     setName('');
+    setPassword('');
     await reload();
   }
 
@@ -858,7 +866,7 @@ function Staff({ rows, token, tenantSlug, reload }: { rows: StaffUser[]; token: 
     }
   }
 
-  return <section className="grid two staff-layout"><form className="card form-stack staff-form-card" onSubmit={submit}><p className="eyebrow">Users and roles</p><h3>Add staff user</h3><label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>Name<input value={name} onChange={(e) => setName(e.target.value)} /></label><label>Roles<select value={roles} onChange={(e) => setRoles(e.target.value)}>{staffRoleOptions.map((role) => <option key={role} value={role}>{role}</option>)}</select></label><button>Add staff</button></form><div className="card staff-list-card"><h3>Staff</h3><div className="staff-grid">{rows.length === 0 && <p className="muted">No staff yet.</p>}{rows.map((row) => <div className="staff-card" key={row.id}><button className="close-chip staff-close-chip" type="button" aria-label={`Delete ${row.full_name}`} onClick={() => setPendingDelete(row)}>x</button><div className="staff-head"><div className={`status-dot ${row.is_active ? 'on' : 'off'}`} aria-hidden="true" /><div><strong>{row.full_name}</strong><p>{row.email}</p></div></div><div className="staff-meta"><div><small>ID</small><span>#{row.id}</span></div><div><small>Status</small><span>{row.is_active ? 'active' : 'inactive'}</span></div></div><div className="staff-roles">{row.roles.length > 0 ? row.roles.map((role) => <span className="staff-role-pill" key={role}>{role}</span>) : <span className="muted">No roles</span>}</div></div>)}</div></div>{pendingDelete && <div className="confirm-overlay" role="dialog" aria-modal="true"><div className="confirm-card"><h3>Are you sure you want to delete this role?</h3><p className="muted">{pendingDelete.full_name} · {pendingDelete.email}</p><div className="button-row"><button onClick={() => void confirmDelete()} disabled={deletingId === pendingDelete.id}>{deletingId === pendingDelete.id ? 'Deleting...' : 'Accept'}</button><button className="secondary" onClick={() => setPendingDelete(null)} disabled={deletingId === pendingDelete.id}>Cancel</button></div></div></div>}</section>;
+  return <section className="grid two staff-layout"><form className="card form-stack staff-form-card" onSubmit={submit}><p className="eyebrow">Users and roles</p><h3>Add staff user</h3><label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>Name<input value={name} onChange={(e) => setName(e.target.value)} /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label>Roles<select value={roles} onChange={(e) => setRoles(e.target.value)}>{staffRoleOptions.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>{boxError(formError)}<button>Add staff</button></form><div className="card staff-list-card"><h3>Staff</h3><div className="staff-grid">{rows.length === 0 && <p className="muted">No staff yet.</p>}{rows.map((row) => <div className="staff-card" key={row.id}><button className="close-chip staff-close-chip" type="button" aria-label={`Delete ${row.full_name}`} onClick={() => setPendingDelete(row)}>x</button><div className="staff-head"><div className={`status-dot ${row.is_active ? 'on' : 'off'}`} aria-hidden="true" /><div><strong>{row.full_name}</strong><p>{row.email}</p></div></div><div className="staff-meta"><div><small>ID</small><span>#{row.id}</span></div><div><small>Status</small><span>{row.is_active ? 'active' : 'inactive'}</span></div></div><div className="staff-roles">{row.roles.length > 0 ? row.roles.map((role) => <span className="staff-role-pill" key={role}>{role}</span>) : <span className="muted">No roles</span>}</div></div>)}</div></div>{pendingDelete && <div className="confirm-overlay" role="dialog" aria-modal="true"><div className="confirm-card"><h3>Are you sure you want to delete this role?</h3><p className="muted">{pendingDelete.full_name} · {pendingDelete.email}</p><div className="button-row"><button onClick={() => void confirmDelete()} disabled={deletingId === pendingDelete.id}>{deletingId === pendingDelete.id ? 'Deleting...' : 'Accept'}</button><button className="secondary" onClick={() => setPendingDelete(null)} disabled={deletingId === pendingDelete.id}>Cancel</button></div></div></div>}</section>;
 }
 
 function normalizeIntentCode(value: string) {

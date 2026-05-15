@@ -6,21 +6,34 @@ from app.api.routes_config import (
     IntentCreate,
     IntentUpdate,
     RoutingRuleUpsert,
+    StaffCreate,
     archive_faq,
+    create_staff,
     create_faq,
     create_intent,
     delete_faq_permanently,
     delete_intent,
     delete_knowledge_item,
     list_faq,
+    list_staff,
     list_intents,
     list_routing_rules,
     upsert_routing_rule,
     update_faq,
     update_intent,
 )
-from app.models.entities import FaqItem, IntentDefinition, IntentKeyword, RoutingRule, TrainingExample
+from app.api.routes_auth import login
+from app.core.security import verify_password
+from app.core.tenancy import ROLE_BUSINESS_ADMIN, ROLE_OPERATIONS_STAFF, require_tenant_roles
+from app.models.entities import AuditLog, FaqItem, IntentDefinition, IntentKeyword, RoutingRule, TenantUserRole, TrainingExample, User
+from app.schemas.auth import LoginRequest
 from app.services.response_engine import ResponseEngine
+from pydantic import ValidationError
+import pytest
+
+
+class FakeRequest:
+    client = SimpleNamespace(host="127.0.0.1")
 
 
 def test_faq_routes_support_english_question_and_archive(db, tenant):
@@ -283,3 +296,74 @@ def test_routing_rule_supports_offer_handoff_configuration(db, tenant):
     assert pricing["response_behavior"] == "offer_handoff"
     assert pricing["followup_question_ar"] == "هل تحتاج تفاصيل إضافية من موظف؟"
     assert pricing["ticket_type"] == "pricing_help"
+
+
+def test_staff_create_requires_explicit_password():
+    with pytest.raises(ValidationError):
+        StaffCreate(email="staff-missing@example.com", full_name="Staff Missing", roles=[ROLE_OPERATIONS_STAFF])
+
+
+def test_staff_creation_hashes_password_and_does_not_leak_passwords(db, tenant):
+    result = create_staff(
+        payload=StaffCreate(
+            email="staff-secure@example.com",
+            full_name="Staff Secure",
+            password="StaffPass123!",
+            roles=[ROLE_OPERATIONS_STAFF],
+        ),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=55)},
+    )
+
+    user = db.query(User).filter(User.email == "staff-secure@example.com").one()
+    staff_rows = list_staff(tenant=tenant, db=db, _={})
+    created = next(row for row in staff_rows if row["id"] == user.id)
+    audit = db.query(AuditLog).filter(AuditLog.tenant_id == tenant.id, AuditLog.action == "staff.created_or_updated").order_by(AuditLog.id.desc()).first()
+
+    assert result == {"id": user.id, "status": "saved"}
+    assert user.password_hash != "StaffPass123!"
+    assert verify_password("StaffPass123!", user.password_hash)
+    assert "password" not in result
+    assert "password_hash" not in created
+    assert "password" not in created
+    assert audit is not None
+    assert "password" not in (audit.details_json or {})
+
+
+def test_created_staff_can_login_with_explicit_password(db, tenant):
+    create_staff(
+        payload=StaffCreate(
+            email="staff-login@example.com",
+            full_name="Staff Login",
+            password="StaffLogin123!",
+            roles=[ROLE_OPERATIONS_STAFF],
+        ),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=56)},
+    )
+
+    response = login(
+        LoginRequest(email="staff-login@example.com", password="StaffLogin123!", tenant_slug=tenant.slug),
+        request=FakeRequest(),
+        db=db,
+    )
+
+    assert response.access_token
+    assert response.user["email"] == "staff-login@example.com"
+
+
+def test_non_admin_role_dependency_blocks_staff_creation(db, tenant):
+    user = User(email="ops-only@example.com", full_name="Ops Only", password_hash="hash")
+    db.add(user)
+    db.flush()
+    db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code=ROLE_OPERATIONS_STAFF))
+    db.commit()
+
+    dependency = require_tenant_roles(ROLE_BUSINESS_ADMIN)
+
+    with pytest.raises(Exception) as exc:
+        dependency(db=db, user=user, tenant=tenant)
+
+    assert getattr(exc.value, "status_code", None) == 403

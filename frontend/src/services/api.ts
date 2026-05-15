@@ -160,7 +160,7 @@ export const api = {
   },
   deleteAccount: (token: string, tenantSlug: string, password: string) => request<{ status: string; deleted_tenant: { id: number; slug: string }; deleted_user: boolean }>('/auth/account', { method: 'DELETE', body: JSON.stringify({ password }), ...auth(token, tenantSlug) }),
   staff: (token: string, tenantSlug: string) => request<StaffUser[]>('/staff', auth(token, tenantSlug)),
-  createStaff: (token: string, tenantSlug: string, payload: { email: string; full_name: string; password?: string; roles: string[] }) => request('/staff', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
+  createStaff: (token: string, tenantSlug: string, payload: { email: string; full_name: string; password: string; roles: string[] }) => request('/staff', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   deleteStaff: (token: string, tenantSlug: string, userId: number) => request<{ status: string; user_id: number }>(`/staff/${userId}`, { method: 'DELETE', ...auth(token, tenantSlug) }),
   faq: (token: string, tenantSlug: string) => request<FaqItem[]>('/faq', auth(token, tenantSlug)),
   createFaq: (token: string, tenantSlug: string, payload: Omit<FaqItem, 'id'>) => request('/faq', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),

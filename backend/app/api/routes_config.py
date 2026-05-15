@@ -224,7 +224,7 @@ class BranchUpdate(BaseModel):
 class StaffCreate(BaseModel):
     email: EmailStr
     full_name: str
-    password: str = "ChangeMe123!"
+    password: str = Field(min_length=8)
     roles: list[str] = Field(default_factory=lambda: [ROLE_OPERATIONS_STAFF])
 
 

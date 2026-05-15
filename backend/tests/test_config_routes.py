@@ -1,5 +1,7 @@
+import asyncio
 from types import SimpleNamespace
 
+from app.api import routes_config
 from app.api.routes_config import (
     FaqCreate,
     FaqUpdate,
@@ -21,6 +23,7 @@ from app.api.routes_config import (
     upsert_routing_rule,
     update_faq,
     update_intent,
+    upload_profile_logo,
 )
 from app.api.routes_auth import login
 from app.core.security import verify_password
@@ -34,6 +37,32 @@ import pytest
 
 class FakeRequest:
     client = SimpleNamespace(host="127.0.0.1")
+
+
+class FakeLogoRequest:
+    base_url = "http://testserver/"
+
+
+class FakeUploadFile:
+    def __init__(self, filename: str, content_type: str, content: bytes):
+        self.filename = filename
+        self.content_type = content_type
+        self._content = content
+
+    async def read(self) -> bytes:
+        return self._content
+
+
+def run_logo_upload(db, tenant, filename: str, content_type: str, content: bytes):
+    return asyncio.run(
+        upload_profile_logo(
+            request=FakeLogoRequest(),
+            file=FakeUploadFile(filename, content_type, content),
+            tenant=tenant,
+            db=db,
+            ctx={"user": SimpleNamespace(id=88)},
+        )
+    )
 
 
 def test_faq_routes_support_english_question_and_archive(db, tenant):
@@ -356,6 +385,89 @@ def test_created_staff_can_login_with_explicit_password(db, tenant):
 
 def test_non_admin_role_dependency_blocks_staff_creation(db, tenant):
     user = User(email="ops-only@example.com", full_name="Ops Only", password_hash="hash")
+    db.add(user)
+    db.flush()
+    db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code=ROLE_OPERATIONS_STAFF))
+    db.commit()
+
+    dependency = require_tenant_roles(ROLE_BUSINESS_ADMIN)
+
+    with pytest.raises(Exception) as exc:
+        dependency(db=db, user=user, tenant=tenant)
+
+    assert getattr(exc.value, "status_code", None) == 403
+
+
+def test_logo_upload_rejects_svg_filename_even_with_png_content(db, tenant, tmp_path, monkeypatch):
+    monkeypatch.setattr(routes_config, "UPLOAD_ROOT", tmp_path)
+
+    with pytest.raises(Exception) as exc:
+        run_logo_upload(db, tenant, "logo.svg", "image/png", b"\x89PNG\r\n\x1a\nsafe")
+
+    assert getattr(exc.value, "status_code", None) == 400
+
+
+def test_logo_upload_rejects_svg_content_named_png(db, tenant, tmp_path, monkeypatch):
+    monkeypatch.setattr(routes_config, "UPLOAD_ROOT", tmp_path)
+    svg = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"
+
+    with pytest.raises(Exception) as exc:
+        run_logo_upload(db, tenant, "logo.png", "image/png", svg)
+
+    assert getattr(exc.value, "status_code", None) == 400
+
+
+def test_logo_upload_rejects_svg_content_type(db, tenant, tmp_path, monkeypatch):
+    monkeypatch.setattr(routes_config, "UPLOAD_ROOT", tmp_path)
+
+    with pytest.raises(Exception) as exc:
+        run_logo_upload(db, tenant, "logo.png", "image/svg+xml", b"\x89PNG\r\n\x1a\nsafe")
+
+    assert getattr(exc.value, "status_code", None) == 400
+
+
+def test_logo_upload_accepts_png_jpeg_and_webp(db, tenant, tmp_path, monkeypatch):
+    monkeypatch.setattr(routes_config, "UPLOAD_ROOT", tmp_path)
+
+    uploads = [
+        ("logo.png", "image/png", b"\x89PNG\r\n\x1a\nsafe", ".png"),
+        ("logo.jpg", "image/jpeg", b"\xff\xd8\xff\xe0safe", ".jpg"),
+        ("logo.webp", "image/webp", b"RIFF\x10\x00\x00\x00WEBPVP8 safe", ".webp"),
+    ]
+
+    for filename, content_type, content, extension in uploads:
+        response = run_logo_upload(db, tenant, filename, content_type, content)
+        assert response["status"] == "uploaded"
+        assert response["logo_url"].startswith("http://testserver/uploads/tenant_logos/test-tenant/")
+        assert response["logo_url"].endswith(extension)
+
+
+def test_logo_upload_rejects_oversized_file(db, tenant, tmp_path, monkeypatch):
+    monkeypatch.setattr(routes_config, "UPLOAD_ROOT", tmp_path)
+    oversized = b"\x89PNG\r\n\x1a\n" + (b"x" * routes_config.MAX_LOGO_BYTES)
+
+    with pytest.raises(Exception) as exc:
+        run_logo_upload(db, tenant, "logo.png", "image/png", oversized)
+
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "5 MB" in getattr(exc.value, "detail", "")
+
+
+def test_logo_upload_uses_generated_filename_and_does_not_audit_original_filename(db, tenant, tmp_path, monkeypatch):
+    monkeypatch.setattr(routes_config, "UPLOAD_ROOT", tmp_path)
+
+    response = run_logo_upload(db, tenant, "../../evil.png", "image/png", b"\x89PNG\r\n\x1a\nsafe")
+    audit = db.query(AuditLog).filter(AuditLog.tenant_id == tenant.id, AuditLog.action == "settings.profile.logo_uploaded").order_by(AuditLog.id.desc()).first()
+
+    assert "../" not in response["logo_url"]
+    assert "evil.png" not in response["logo_url"]
+    assert audit is not None
+    assert audit.details_json["stored_filename"].endswith(".png")
+    assert "filename" not in audit.details_json
+
+
+def test_non_admin_role_dependency_blocks_logo_upload(db, tenant):
+    user = User(email="ops-logo@example.com", full_name="Ops Logo", password_hash="hash")
     db.add(user)
     db.flush()
     db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code=ROLE_OPERATIONS_STAFF))

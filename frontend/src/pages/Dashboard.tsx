@@ -96,9 +96,9 @@ function initialsFromName(value: string) {
 }
 
 function looksLikeImageFile(file: File) {
-  if (file.type.startsWith('image/')) return true;
+  if (['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return true;
   const lower = file.name.toLowerCase();
-  return ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg', '.heic', '.heif', '.avif'].some((ext) => lower.endsWith(ext));
+  return ['.png', '.jpg', '.jpeg', '.webp'].some((ext) => lower.endsWith(ext));
 }
 
 export function Dashboard({ session, tenantSlug, onLogout }: Props) {
@@ -364,7 +364,7 @@ function Overview({ tenant, token, tenantSlug, readiness, analytics, previewText
     if (!file) return;
     setLogoMessage(null);
     if (!looksLikeImageFile(file)) {
-      setLogoMessage('Please choose an image file.');
+      setLogoMessage('Please choose a PNG, JPEG, or WebP image.');
       event.target.value = '';
       return;
     }
@@ -420,7 +420,7 @@ function Overview({ tenant, token, tenantSlug, readiness, analytics, previewText
           </div>
           <div className="logo-upload-actions">
             <label className="logo-upload-button">
-              <input type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.heic,.heif,.avif" onChange={uploadLogo} disabled={uploadingLogo} />
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadLogo} disabled={uploadingLogo} />
               <span>{uploadingLogo ? 'Uploading image...' : 'Upload image'}</span>
             </label>
             {tenant?.brand.logo_url && <button type="button" className="secondary logo-remove-button" onClick={() => void removeLogo()} disabled={uploadingLogo}>Remove</button>}

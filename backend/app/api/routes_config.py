@@ -45,16 +45,11 @@ STAFF_ROLES = (
     ROLE_BROADCAST_OPERATOR,
 )
 UPLOAD_ROOT = Path(__file__).resolve().parents[2] / "uploads" / "tenant_logos"
+MAX_LOGO_BYTES = 5 * 1024 * 1024
 ALLOWED_LOGO_TYPES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
-    "image/gif": ".gif",
-    "image/bmp": ".bmp",
-    "image/svg+xml": ".svg",
-    "image/avif": ".avif",
-    "image/heic": ".heic",
-    "image/heif": ".heif",
 }
 
 
@@ -78,6 +73,27 @@ def delete_local_logo_file(logo_url: str | None) -> None:
     file_path = Path(__file__).resolve().parents[2] / "uploads" / relative_path
     if file_path.exists() and file_path.is_file():
         file_path.unlink()
+
+
+def _svg_or_xml_like(content: bytes) -> bool:
+    stripped = content[:512].lstrip().lower()
+    return stripped.startswith((b"<svg", b"<?xml", b"<!doctype svg")) or b"<svg" in stripped
+
+
+def detect_logo_type(content: bytes) -> tuple[str, str] | None:
+    if _svg_or_xml_like(content):
+        return None
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png", ".png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg", ".jpg"
+    if len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return "image/webp", ".webp"
+    return None
+
+
+def _has_svg_filename(filename: str | None) -> bool:
+    return Path(filename or "").suffix.lower() == ".svg"
 
 
 def normalize_intent_code(code: str) -> str:
@@ -350,26 +366,32 @@ async def upload_profile_logo(
     ctx: dict = Depends(require_tenant_roles(*ADMIN_ROLES)),
 ):
     content_type = (file.content_type or "").lower()
-    if content_type not in ALLOWED_LOGO_TYPES:
+    if content_type not in ALLOWED_LOGO_TYPES or _has_svg_filename(file.filename):
         raise HTTPException(status_code=400, detail="Unsupported image format")
 
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
-    if len(content) > 5 * 1024 * 1024:
+    if len(content) > MAX_LOGO_BYTES:
         raise HTTPException(status_code=400, detail="Please keep the image under 5 MB")
+    detected = detect_logo_type(content)
+    if not detected:
+        raise HTTPException(status_code=400, detail="Unsupported image format")
+    detected_content_type, extension = detected
+    if content_type != detected_content_type:
+        raise HTTPException(status_code=400, detail="Unsupported image format")
 
     brand = ensure_brand(db, tenant.id)
     tenant_dir = UPLOAD_ROOT / tenant.slug
     tenant_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{uuid4().hex}{ALLOWED_LOGO_TYPES[content_type]}"
+    filename = f"{uuid4().hex}{extension}"
     file_path = tenant_dir / filename
     file_path.write_bytes(content)
 
     delete_local_logo_file(brand.logo_url)
     logo_url = f"/uploads/tenant_logos/{tenant.slug}/{filename}"
     brand.logo_url = logo_url
-    audit(db, tenant.id, ctx["user"].id, "settings.profile.logo_uploaded", "tenant", str(tenant.id), {"logo_url": logo_url, "filename": file.filename})
+    audit(db, tenant.id, ctx["user"].id, "settings.profile.logo_uploaded", "tenant", str(tenant.id), {"logo_url": logo_url, "stored_filename": filename})
     db.commit()
     return {"status": "uploaded", "logo_url": str(request.base_url).rstrip("/") + logo_url}
 

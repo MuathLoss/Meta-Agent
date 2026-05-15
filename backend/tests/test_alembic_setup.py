@@ -12,7 +12,7 @@ def test_alembic_has_one_head_and_metadata_loads():
     config = Config(str(backend_dir / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["20260515_0003"]
+    assert script.get_heads() == ["20260515_0004"]
     assert len(Base.metadata.tables) == 20
     assert "tenants" in Base.metadata.tables
     assert "webhook_events" in Base.metadata.tables
@@ -89,3 +89,23 @@ def test_nullability_cleanup_revision_follows_indexes_and_contains_expected_oper
     assert '"supported_languages"' in source
     assert '"response_mode"' in source
     assert '"metadata_json"' in source
+
+
+def test_tenant_webhook_uniqueness_revision_follows_nullability_cleanup():
+    backend_dir = Path(__file__).resolve().parents[1]
+    revision_path = backend_dir / "migrations" / "versions" / "20260515_0004_tenant_webhook_uniqueness.py"
+    source = revision_path.read_text()
+    spec = spec_from_file_location("tenant_webhook_uniqueness_revision", revision_path)
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.revision == "20260515_0004"
+    assert module.down_revision == "20260515_0003"
+    assert '"uq_webhook_provider_event", "webhook_events", type_="unique"' in source
+    assert '"uq_webhook_tenant_provider_event"' in source
+    assert '["tenant_id", "provider", "provider_event_id"]' in source
+    assert '_duplicate_count("tenant_id, provider, provider_event_id")' in source
+    assert '_duplicate_count("provider, provider_event_id")' in source

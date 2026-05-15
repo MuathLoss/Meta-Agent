@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,6 +10,9 @@ from app.api import routes_auth, routes_onboarding, routes_channels, routes_dash
 from app.core.config import settings
 from app.core.db import SessionLocal
 
+logger = logging.getLogger(__name__)
+settings.validate_startup()
+
 app = FastAPI(title="Configurable Multi-Tenant Business Agent Platform", version="0.7.0")
 uploads_dir = Path(__file__).resolve().parent / "uploads"
 uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -17,9 +21,28 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "Origin",
+        "X-Hub-Signature-256",
+        "X-Requested-With",
+        "X-Telegram-Bot-Api-Secret-Token",
+    ],
 )
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
 
 @app.get("/health")
 def health():
@@ -31,8 +54,9 @@ def readiness():
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
         return {"status": "ready", "database": "ok"}
-    except Exception as exc:
-        return {"status": "not_ready", "database": "error", "detail": str(exc)}
+    except Exception:
+        logger.warning("database readiness check failed: database_error")
+        return {"status": "not_ready", "database": "error", "error": "database_unavailable"}
 
 app.include_router(routes_auth.router)
 app.include_router(routes_onboarding.router)

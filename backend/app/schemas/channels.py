@@ -1,9 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class ChannelConfigRequest(BaseModel):
     status: str = "not_connected"
-    public_config: dict = {}
-    credentials: dict = {}
+    public_config: dict = Field(default_factory=dict)
+    credentials: dict = Field(default_factory=dict)
 
 class ChannelConfigResponse(BaseModel):
     channel_type: str

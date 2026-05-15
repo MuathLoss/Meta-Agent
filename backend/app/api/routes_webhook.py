@@ -21,6 +21,7 @@ telegram_adapter = TelegramAdapter()
 logger = logging.getLogger(__name__)
 
 ACTIVE_CHANNEL_STATUSES = {"configured", "connected", "active", "not_connected"}
+WEBHOOK_DEV_ENVS = {"development", "dev", "test", "testing", "local"}
 
 
 class AmbiguousChannelResolution(Exception):
@@ -51,6 +52,12 @@ def _stored_event_id(tenant_id: int, provider_event_id: str) -> str:
     # The current DB uniqueness is provider-wide. Prefixing at write time gives
     # tenant-aware idempotency without changing schema in this non-destructive patch.
     return f"tenant:{tenant_id}:{provider_event_id}"
+
+
+def _allow_unsigned_whatsapp_webhook(signature_header: str | None) -> bool:
+    if signature_header:
+        return False
+    return settings.allow_unsigned_webhooks_in_dev and settings.app_env.lower() in WEBHOOK_DEV_ENVS
 
 
 def _resolve_channel_by_secret_token(db: Session, channel_type: str, secret_key: str, secret_value: str | None) -> ChannelConfig | None:
@@ -140,10 +147,12 @@ async def receive(request: Request, db: Session = Depends(get_db)):
 
     creds = channel_service.credentials(channel)
     signature_header = request.headers.get("X-Hub-Signature-256")
-    if not whatsapp_adapter.valid_signature(raw_body=raw_body, signature_header=signature_header, app_secret=creds.get("app_secret")):
-        if settings.allow_unsigned_webhooks_in_dev and settings.app_env == "development":
-            pass
-        else:
+    app_secret = creds.get("app_secret")
+    if not whatsapp_adapter.usable_app_secret(app_secret):
+        if not _allow_unsigned_whatsapp_webhook(signature_header):
+            raise HTTPException(status_code=403, detail="WhatsApp webhook app secret is not configured")
+    elif not whatsapp_adapter.valid_signature(raw_body=raw_body, signature_header=signature_header, app_secret=app_secret):
+        if not _allow_unsigned_whatsapp_webhook(signature_header):
             raise HTTPException(status_code=403, detail="Invalid WhatsApp webhook signature")
 
     stored_event_id = _stored_event_id(channel.tenant_id, normalized.provider_message_id)

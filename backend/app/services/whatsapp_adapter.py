@@ -20,6 +20,7 @@ class NormalizedInboundMessage:
 
 class WhatsAppAdapter:
     provider = "whatsapp"
+    PLACEHOLDER_SECRET_MARKERS = ("pending", "replace-with", "changeme", "placeholder")
 
     def normalize_inbound(self, payload: dict[str, Any]) -> NormalizedInboundMessage | None:
         try:
@@ -40,12 +41,20 @@ class WhatsAppAdapter:
             return None
 
     def valid_signature(self, *, raw_body: bytes, signature_header: str | None, app_secret: str | None) -> bool:
-        if not app_secret or app_secret == "pending":
-            return True
+        if not self.usable_app_secret(app_secret):
+            return False
         if not signature_header or not signature_header.startswith("sha256="):
             return False
         expected = "sha256=" + hmac.new(app_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature_header)
+
+    def usable_app_secret(self, app_secret: str | None) -> bool:
+        if not app_secret:
+            return False
+        normalized = app_secret.strip().lower()
+        if not normalized:
+            return False
+        return not any(marker in normalized for marker in self.PLACEHOLDER_SECRET_MARKERS)
 
     def send_text(self, *, access_token: str, phone_number_id: str, to_phone: str, text: str, timeout_seconds: float = 10.0) -> dict[str, Any]:
         url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"

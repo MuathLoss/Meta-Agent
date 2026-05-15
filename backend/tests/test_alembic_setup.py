@@ -12,7 +12,7 @@ def test_alembic_has_one_head_and_metadata_loads():
     config = Config(str(backend_dir / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["20260515_0002"]
+    assert script.get_heads() == ["20260515_0003"]
     assert len(Base.metadata.tables) == 20
     assert "tenants" in Base.metadata.tables
     assert "webhook_events" in Base.metadata.tables
@@ -67,3 +67,25 @@ def test_performance_index_revision_follows_baseline_and_names_expected_indexes(
         "ix_faq_items_tenant_status",
         "ix_intent_keywords_tenant_intent_code",
     }
+
+
+def test_nullability_cleanup_revision_follows_indexes_and_contains_expected_operations():
+    backend_dir = Path(__file__).resolve().parents[1]
+    revision_path = backend_dir / "migrations" / "versions" / "20260515_0003_nullability_drift_cleanup.py"
+    source = revision_path.read_text()
+    spec = spec_from_file_location("nullability_cleanup_revision", revision_path)
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.revision == "20260515_0003"
+    assert module.down_revision == "20260515_0002"
+    assert "UPDATE intent_definitions SET supported_languages = 'ar' WHERE supported_languages IS NULL" in source
+    assert "UPDATE intent_definitions SET response_mode = 'faq' WHERE response_mode IS NULL" in source
+    assert "UPDATE conversations SET metadata_json = '{}' WHERE metadata_json IS NULL" in source
+    assert source.count("nullable=False") == 3
+    assert '"supported_languages"' in source
+    assert '"response_mode"' in source
+    assert '"metadata_json"' in source

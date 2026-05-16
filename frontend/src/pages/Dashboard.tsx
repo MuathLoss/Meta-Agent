@@ -2494,22 +2494,72 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
 }
 
 function Tickets({ rows, token, tenantSlug, reload, openConversation }: { rows: Ticket[]; token: string; tenantSlug: string; reload: () => Promise<void>; openConversation: (id: number) => Promise<void> }) {
+  const [filter, setFilter] = useState<'active' | 'escalated' | 'resolved' | 'all'>('active');
+  const [ticketMessage, setTicketMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [resolvingId, setResolvingId] = useState<number | null>(null);
+  const ticketGridRef = useRef<HTMLDivElement | null>(null);
   const statusClass = (value: string) => value.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-  const openCount = rows.filter((row) => row.status !== 'resolved').length;
-  const escalatedCount = rows.filter((row) => row.priority === 'high' || row.priority === 'urgent' || row.status === 'escalated').length;
+  const isResolved = (row: Ticket) => ['resolved', 'closed'].includes(row.status.toLowerCase());
+  const isEscalated = (row: Ticket) => ['high', 'urgent'].includes(row.priority.toLowerCase()) || row.status.toLowerCase() === 'escalated';
+  const activeRows = rows.filter((row) => !isResolved(row));
+  const escalatedRows = rows.filter(isEscalated);
+  const resolvedRows = rows.filter(isResolved);
+  const visibleRows = filter === 'active' ? activeRows : filter === 'escalated' ? escalatedRows : filter === 'resolved' ? resolvedRows : rows;
+  const filterOptions: Array<{ key: typeof filter; label: string; count: number }> = [
+    { key: 'active', label: 'Active', count: activeRows.length },
+    { key: 'escalated', label: 'Escalated', count: escalatedRows.length },
+    { key: 'resolved', label: 'Resolved', count: resolvedRows.length },
+    { key: 'all', label: 'All', count: rows.length },
+  ];
+
+  useEffect(() => {
+    const grid = ticketGridRef.current;
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll<HTMLElement>('.ticket-card'));
+    if (!('IntersectionObserver' in window)) {
+      cards.forEach((card) => card.classList.add('is-visible'));
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        entry.target.classList.toggle('is-visible', entry.isIntersecting);
+      });
+    }, { root: null, threshold: .18, rootMargin: '-8% 0px -10% 0px' });
+    cards.forEach((card) => observer.observe(card));
+    return () => observer.disconnect();
+  }, [visibleRows.length, filter]);
+
+  async function resolveTicket(ticket: Ticket) {
+    setResolvingId(ticket.id);
+    setTicketMessage(null);
+    try {
+      await api.updateTicket(token, tenantSlug, ticket.id, { status: 'resolved' });
+      setTicketMessage({ type: 'success', text: `Ticket #${ticket.id} resolved. It remains available in Resolved and All.` });
+      await reload();
+    } catch (err) {
+      setTicketMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to resolve ticket' });
+    } finally {
+      setResolvingId(null);
+    }
+  }
 
   return <section className="card tickets-page">
     <div className="tickets-head">
       <div><p className="eyebrow">Tickets</p><h3>Queues and escalations</h3><p className="muted">Track handoffs, complaints, finance, certificate, and supervisor review cases.</p></div>
       <div className="tickets-summary">
-        <div><small>Open</small><strong>{openCount}</strong></div>
-        <div><small>Escalated</small><strong>{escalatedCount}</strong></div>
+        <div><small>Open</small><strong>{activeRows.length}</strong></div>
+        <div><small>Escalated</small><strong>{escalatedRows.length}</strong></div>
         <div><small>Total</small><strong>{rows.length}</strong></div>
       </div>
     </div>
+    <div className="ticket-filter-tabs" role="tablist" aria-label="Ticket queue filter">
+      {filterOptions.map((option) => <button key={option.key} className={filter === option.key ? 'active' : ''} onClick={() => setFilter(option.key)} role="tab" aria-selected={filter === option.key}>{option.label}<span>{option.count}</span></button>)}
+    </div>
+    {ticketMessage && <div className={`ticket-message ${ticketMessage.type}`} role="status">{ticketMessage.text}</div>}
     {rows.length === 0 && <div className="tickets-empty-state"><strong>No tickets yet</strong><p>Escalations and human-review cases will appear here when conversations require operational follow-up.</p></div>}
-    <div className="tickets-grid">
-      {rows.map((t, index) => <article className={`ticket-card ticket-status-${statusClass(t.status)} ticket-priority-${statusClass(t.priority)}`} style={{ animationDelay: `${Math.min(index * 45, 260)}ms` }} key={t.id}>
+    {rows.length > 0 && visibleRows.length === 0 && <div className="tickets-empty-state"><strong>No tickets in {filter}</strong><p>Switch filters to review the rest of the queue.</p></div>}
+    <div className="tickets-grid tickets-scroll-queue" ref={ticketGridRef}>
+      {visibleRows.map((t) => <article className={`ticket-card ticket-status-${statusClass(t.status)} ticket-priority-${statusClass(t.priority)}`} key={t.id}>
         <div className="ticket-card-top">
           <div>
             <span className="ticket-id">#{t.id}</span>
@@ -2526,13 +2576,78 @@ function Tickets({ rows, token, tenantSlug, reload, openConversation }: { rows: 
           <div><small>Type</small><strong>{t.ticket_type || 'general'}</strong></div>
           <div><small>Status</small><strong>{t.status}</strong></div>
         </div>
-        <div className="button-row ticket-actions"><button onClick={() => void openConversation(t.conversation_id)}>Open conversation</button><button className="secondary ticket-resolve-button" onClick={async () => { await api.updateTicket(token, tenantSlug, t.id, { status: 'resolved' }); await reload(); }}>Resolve</button></div>
+        <div className="button-row ticket-actions"><button onClick={() => void openConversation(t.conversation_id)}>Open conversation</button><button className="secondary ticket-resolve-button" disabled={resolvingId === t.id} onClick={() => void resolveTicket(t)}>{resolvingId === t.id ? 'Resolving...' : 'Resolve'}</button></div>
       </article>)}
     </div>
   </section>;
 }
 
-function Customers({ rows }: { rows: Customer[] }) { return <SimpleTable title="Customers" rows={rows} />; }
+function Customers({ rows }: { rows: Customer[] }) {
+  const [selectedId, setSelectedId] = useState<number | null>(rows[0]?.id ?? null);
+  const selected = rows.find((row) => row.id === selectedId) || rows[0] || null;
+  const optedInCount = rows.filter((row) => row.opt_in).length;
+  const taggedCount = rows.filter((row) => (row.tags_json || []).length > 0).length;
+
+  useEffect(() => {
+    if (rows.length === 0) {
+      setSelectedId(null);
+      return;
+    }
+    if (!rows.some((row) => row.id === selectedId)) setSelectedId(rows[0].id);
+  }, [rows, selectedId]);
+
+  return <section className="customers-workspace">
+    <div className="card customers-list-panel">
+      <div className="customers-head">
+        <div><p className="eyebrow">Customers</p><h3>Customer records</h3><p className="muted">Tenant-safe identity, consent, tags, and support context.</p></div>
+        <div className="customers-summary">
+          <div><small>Total</small><strong>{rows.length}</strong></div>
+          <div><small>Opted in</small><strong>{optedInCount}</strong></div>
+          <div><small>Tagged</small><strong>{taggedCount}</strong></div>
+        </div>
+      </div>
+      {rows.length === 0 && <div className="customers-empty-state"><strong>No customers yet</strong><p>Customer records will appear here after conversations or imports create tenant-scoped profiles.</p></div>}
+      <div className="customers-grid">
+        {rows.map((customer, index) => {
+          const isSelected = selected?.id === customer.id;
+          return <button className={`customer-card${isSelected ? ' active' : ''}`} aria-current={isSelected ? 'true' : undefined} style={{ animationDelay: `${Math.min(index * 45, 260)}ms` }} key={customer.id} onClick={() => setSelectedId(customer.id)}>
+            <span className="customer-card-top">
+              <span>
+                <strong>{customer.name || customer.phone}</strong>
+                <small>{customer.phone}</small>
+              </span>
+              <span className={`customer-opt-pill ${customer.opt_in ? 'in' : 'out'}`}>{customer.opt_in ? 'Opted in' : 'Opt-out'}</span>
+            </span>
+            <span className="customer-email">{customer.email || 'No email on record'}</span>
+            <span className="customer-tags">{(customer.tags_json || []).length > 0 ? customer.tags_json.slice(0, 4).map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}</span>
+          </button>;
+        })}
+      </div>
+    </div>
+    <aside className="card customer-detail-panel">
+      <p className="eyebrow">Customer context</p>
+      {selected ? <>
+        <div className="customer-detail-head">
+          <div><h3>{selected.name || selected.phone}</h3><p>{selected.email || 'No email on record'}</p></div>
+          <span className={`customer-opt-pill ${selected.opt_in ? 'in' : 'out'}`}>{selected.opt_in ? 'Opted in' : 'Opt-out'}</span>
+        </div>
+        <div className="customer-meta-grid">
+          <div><small>Phone</small><strong>{selected.phone}</strong></div>
+          <div><small>Preferred language</small><strong>{selected.preferred_lang || 'not set'}</strong></div>
+          <div><small>Customer ID</small><strong>#{selected.id}</strong></div>
+        </div>
+        <div className="customer-detail-section">
+          <small>Tags</small>
+          <div className="customer-tags detail-tags">{(selected.tags_json || []).length > 0 ? selected.tags_json.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags yet</span>}</div>
+        </div>
+        <div className="customer-detail-section">
+          <small>History</small>
+          <p className="muted">Conversation activity is available from the Inbox and Tickets workflows when linked records exist.</p>
+        </div>
+      </> : <div className="customers-empty-state detail-empty"><strong>Select a customer</strong><p>Customer metadata and tags will appear here.</p></div>}
+    </aside>
+  </section>;
+}
 
 function Broadcasts({ rows, token, tenantSlug, reload }: { rows: Broadcast[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {
   const [title, setTitle] = useState('');

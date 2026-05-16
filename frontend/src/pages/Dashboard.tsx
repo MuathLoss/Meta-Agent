@@ -264,22 +264,27 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
               ? <img src={logoUrl} alt={`${tenantName} logo`} className="brand-mark-image" />
               : initialsFromName(tenantName)}
           </div>
-          <div><span className="brand-kicker">[Workspace]</span><h2>Agent Platform</h2><p>{tenantSlug}</p></div>
+          <div className="brand-copy">
+            <span className="brand-kicker">[Workspace]</span>
+            <h2>Agent Platform</h2>
+            <p>{tenantSlug}</p>
+            <span className="brand-micro">Control node / live</span>
+          </div>
         </div>
         <nav>
           <div className="nav-section">
             <span className="nav-section-label">Operate</span>
-            {primaryTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}{t.key === 'inbox' && hasComplaintAlert && <span className="nav-alert-dot" aria-hidden="true" />}</span></button>)}
+            {primaryTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}{t.key === 'inbox' && hasComplaintAlert && <span className="nav-alert-dot" aria-hidden="true" />}</span></button>)}
           </div>
           <div className="nav-section">
             <span className="nav-section-label">Configure</span>
-            {workspaceTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
+            {workspaceTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
           </div>
           <div className="nav-section">
             <span className="nav-section-label">System</span>
-            {systemTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
+            {systemTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
             <div className="sidebar-flyout-wrap">
-              <button ref={devButtonRef} className={tab === 'dev' ? 'active' : ''} onClick={() => { setTab('dev'); setDevMenuOpen((current) => !current); }}>
+              <button ref={devButtonRef} className={tab === 'dev' ? 'active' : ''} aria-current={tab === 'dev' ? 'page' : undefined} onClick={() => { setTab('dev'); setDevMenuOpen((current) => !current); }}>
                 <span className="nav-button-label">Dev</span>
               </button>
             </div>

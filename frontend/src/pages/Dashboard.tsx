@@ -128,6 +128,7 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   const [devView, setDevView] = useState<DevView>('deployment');
   const [devMenuOpen, setDevMenuOpen] = useState(false);
   const [devMenuPosition, setDevMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [handoffToast, setHandoffToast] = useState<{ count: number; visible: boolean } | null>(null);
   const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -146,6 +147,21 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   const primaryTabs = tabs.slice(0, 3);
   const workspaceTabs = tabs.slice(3, 10);
   const systemTabs = tabs.slice(10);
+
+  function selectTab(nextTab: Tab) {
+    setTab(nextTab);
+    setMobileNavOpen(false);
+  }
+
+  function selectDevTab() {
+    setTab('dev');
+    if (window.innerWidth <= 980) {
+      setDevMenuOpen(false);
+      setMobileNavOpen(false);
+      return;
+    }
+    setDevMenuOpen((current) => !current);
+  }
 
   function updateInboxState(rows: InboxItem[]) {
     setInbox(rows);
@@ -231,6 +247,25 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
     if (tab !== 'dev') setDevMenuOpen(false);
   }, [tab]);
   useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+        setDevMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileNavOpen]);
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onResize = () => {
+      if (window.innerWidth > 980) setMobileNavOpen(false);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [mobileNavOpen]);
+  useEffect(() => {
     if (!devMenuOpen || !devButtonRef.current) return;
     const updatePosition = () => {
       if (!devButtonRef.current) return;
@@ -256,8 +291,20 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   }, []);
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
+    <main className={`app-shell${mobileNavOpen ? ' mobile-nav-open' : ''}`}>
+      <header className="mobile-shell-bar">
+        <button className="mobile-menu-button" type="button" aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileNavOpen} onClick={() => { setMobileNavOpen((current) => !current); if (mobileNavOpen) setDevMenuOpen(false); }}>
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+        </button>
+        <div className="mobile-shell-title">
+          <strong>{currentPageTitle}</strong>
+          <span>{tenantSlug}</span>
+        </div>
+      </header>
+      <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation menu" aria-hidden={!mobileNavOpen} tabIndex={mobileNavOpen ? 0 : -1} onClick={() => { setMobileNavOpen(false); setDevMenuOpen(false); }} />
+      <aside className="sidebar" aria-label="Dashboard navigation">
         <div className="brand-lockup">
           <div className="brand-mark">
             {logoUrl
@@ -274,17 +321,17 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
         <nav>
           <div className="nav-section">
             <span className="nav-section-label">Operate</span>
-            {primaryTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}{t.key === 'inbox' && hasComplaintAlert && <span className="nav-alert-dot" aria-hidden="true" />}</span></button>)}
+            {primaryTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => selectTab(t.key)}><span className="nav-button-label">{t.label}{t.key === 'inbox' && hasComplaintAlert && <span className="nav-alert-dot" aria-hidden="true" />}</span></button>)}
           </div>
           <div className="nav-section">
             <span className="nav-section-label">Configure</span>
-            {workspaceTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
+            {workspaceTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => selectTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
           </div>
           <div className="nav-section">
             <span className="nav-section-label">System</span>
-            {systemTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
+            {systemTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => selectTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
             <div className="sidebar-flyout-wrap">
-              <button ref={devButtonRef} className={tab === 'dev' ? 'active' : ''} aria-current={tab === 'dev' ? 'page' : undefined} onClick={() => { setTab('dev'); setDevMenuOpen((current) => !current); }}>
+              <button ref={devButtonRef} className={tab === 'dev' ? 'active' : ''} aria-current={tab === 'dev' ? 'page' : undefined} onClick={selectDevTab}>
                 <span className="nav-button-label">Dev</span>
               </button>
             </div>
@@ -298,13 +345,13 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
       </aside>
       {devMenuOpen && devMenuPosition && <div className="dev-menu-overlay" onClick={() => setDevMenuOpen(false)}>
         <div className="dev-flyout-panel" style={{ top: `${devMenuPosition.top}px`, left: `${devMenuPosition.left}px` }} onClick={(e) => e.stopPropagation()}>
-          <button className={tab === 'dev' && devView === 'deployment' ? 'active' : ''} onClick={() => { setDevView('deployment'); setTab('dev'); setDevMenuOpen(false); }}>
+          <button className={tab === 'dev' && devView === 'deployment' ? 'active' : ''} onClick={() => { setDevView('deployment'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
             Deployment
           </button>
-          <button className={tab === 'dev' && devView === 'uat' ? 'active' : ''} onClick={() => { setDevView('uat'); setTab('dev'); setDevMenuOpen(false); }}>
+          <button className={tab === 'dev' && devView === 'uat' ? 'active' : ''} onClick={() => { setDevView('uat'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
             UAT tests
           </button>
-          <button className={tab === 'dev' && devView === 'handoff' ? 'active' : ''} onClick={() => { setDevView('handoff'); setTab('dev'); setDevMenuOpen(false); }}>
+          <button className={tab === 'dev' && devView === 'handoff' ? 'active' : ''} onClick={() => { setDevView('handoff'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
             Final handoff
           </button>
         </div>

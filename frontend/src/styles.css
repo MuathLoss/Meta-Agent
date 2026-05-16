@@ -398,6 +398,10 @@ pre { overflow: auto; white-space: pre-wrap; border-radius: 16px; padding: 1rem;
   box-shadow: 22px 0 74px rgba(0,0,0,.36), inset -1px 0 0 rgba(255,255,255,.035);
   animation: shellSidebarIn .38s cubic-bezier(.22, 1, .36, 1);
 }
+.mobile-shell-bar,
+.mobile-nav-backdrop {
+  display: none;
+}
 .brand-lockup {
   display: flex;
   gap: .86rem;
@@ -2566,7 +2570,168 @@ th { color: #fecaca; font-size: .85rem; }
 @media (max-width: 640px) { .customers-summary { grid-template-columns: 1fr; } .customer-card-top, .customer-detail-head { display: grid; } }
 @media (max-width: 640px) { .tickets-summary, .ticket-meta-grid { grid-template-columns: 1fr; } .ticket-filter-tabs button { flex: 1 1 calc(50% - .5rem); } .ticket-card { opacity: .72; transform: translateY(10px) scale(.992); } .ticket-card-top { display: grid; } .ticket-actions button { width: 100%; } }
 @media (max-width: 640px) { .auth-page { padding: 1rem; overflow: auto; } .auth-page::before { animation: none; opacity: .2; } .auth-page::after { width: 92vw; height: 92vw; right: -38%; top: 18%; animation: none; opacity: .58; } .auth-shell { min-height: auto; gap: 1.25rem; } .auth-topline, .auth-tech-line { display: grid; justify-content: start; gap: .45rem; } .auth-headline { font-size: clamp(3.35rem, 17vw, 5.7rem); } .auth-card-head { grid-template-columns: 1fr; } .auth-visual-panel { min-height: 460px; padding: .2rem; } .auth-hero-label { top: 1rem; left: .3rem; } .mock-topbar { display: grid; } .mock-card-stack { grid-template-columns: 1fr; } .auth-core-object { width: min(360px, 86vw); } .auth-core-ring, .mock-status-dot, .mock-message-row::after, .mock-channel-line::after, .mock-progress-line::after { animation: none; } .auth-dashboard-float { width: min(330px, 84vw); right: 0; bottom: 0; } .auth-orbit-one { left: -18%; } .auth-orbit-two { right: -45%; } .auth-dashboard-mock, .auth-core-object { animation-duration: 18s; } .sidebar { padding: .85rem; } .brand-lockup { padding: .65rem; } .sidebar nav, .sidebar-actions { grid-template-columns: 1fr; } .topbar { display: grid; padding: .85rem; } .topbar-meta { justify-content: stretch; } .workspace-pill, .user-pill { width: 100%; } .content { padding: .85rem; } .onboarding-steps, .onboarding-form-grid { grid-template-columns: 1fr; } .onboarding-steps button { min-height: auto; } .onboarding-card-head, .onboarding-actions { display: grid; } .onboarding-actions button { width: 100%; } .card:hover, .sidebar nav button:hover, .onboarding-steps button:hover { transform: none; } }
-@media (prefers-reduced-motion: reduce) { .auth-page::before, .auth-page::after, .auth-card, .auth-card-head, .auth-subtitle, .auth-headline span, .auth-topline, .auth-mode-switch, .auth-mode-switch::before, .auth-form, .auth-signup-fields, .auth-error, .auth-visual-panel, .auth-tech-line, .auth-hero-placeholder, .auth-hero-label, .auth-ambient, .auth-orbit, .auth-core-object, .auth-core-ring, .auth-core-panel, .auth-dashboard-float, .auth-dashboard-mock, .mock-card, .mock-status-dot, .mock-message-row::after, .mock-channel-line::after, .mock-progress-line::after, .auth-submit, .auth-mode-switch button, .auth-form input, .sidebar, .page-transition, .handoff-toast, .nav-alert-dot, .card, .sidebar nav button, .onboarding-runtime-card, .onboarding-progress-track i, .onboarding-steps button, .onboarding-save-message, .inbox-panel, .inbox-row, .inbox-row-animated, .reply-input, .send-chip, .inbox-action-row button, .ticket-card, .ticket-actions button, .ticket-filter-tabs button, .customer-card { animation: none; transition: none; } .ticket-card { opacity: 1; transform: none; filter: none; } .conversation-scroll { scroll-behavior: auto; } }
+@media (max-width: 980px) {
+  html, body { overflow-x: hidden; }
+  .app-shell {
+    grid-template-columns: 1fr;
+    align-content: start;
+    overflow-x: hidden;
+  }
+  .mobile-shell-bar {
+    position: sticky;
+    top: 0;
+    z-index: 42;
+    display: flex;
+    align-items: center;
+    gap: .78rem;
+    min-width: 0;
+    padding: .78rem .9rem;
+    border-bottom: 1px solid rgba(255,255,255,.09);
+    background:
+      linear-gradient(180deg, rgba(10,10,12,.96), rgba(5,5,7,.92)),
+      radial-gradient(circle at 0% 0%, rgba(127,29,29,.18), transparent 48%);
+    box-shadow: 0 16px 42px rgba(0,0,0,.3);
+    backdrop-filter: blur(14px);
+  }
+  .mobile-menu-button {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    gap: 0;
+    padding: .7rem;
+    border-radius: 11px;
+    border: 1px solid rgba(248,113,113,.18);
+    background: rgba(255,255,255,.055);
+    box-shadow: none;
+  }
+  .mobile-menu-button span {
+    display: block;
+    width: 18px;
+    height: 2px;
+    border-radius: 999px;
+    background: #fff7ed;
+  }
+  .mobile-shell-title {
+    min-width: 0;
+    display: grid;
+    gap: .08rem;
+  }
+  .mobile-shell-title strong {
+    color: #fff7ed;
+    font-size: .92rem;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-shell-title span {
+    color: #a8a29e;
+    font-size: .68rem;
+    font-weight: 900;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: rgba(2,6,23,.62);
+    box-shadow: none;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .22s ease;
+  }
+  .mobile-nav-open .mobile-nav-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: min(334px, calc(100vw - 1.15rem));
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    padding: .92rem;
+    gap: .86rem;
+    border-right: 1px solid rgba(255,255,255,.11);
+    box-shadow: 26px 0 76px rgba(0,0,0,.42);
+    transform: translateX(-105%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform .24s cubic-bezier(.22, 1, .36, 1), visibility .24s step-end;
+  }
+  .mobile-nav-open .sidebar {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+    transition: transform .24s cubic-bezier(.22, 1, .36, 1), visibility 0s;
+  }
+  .sidebar nav {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    padding: .1rem .18rem .1rem 0;
+  }
+  .sidebar-actions {
+    grid-template-columns: 1fr;
+  }
+  .brand-lockup {
+    padding: .72rem;
+  }
+  .content {
+    padding: .9rem;
+    overflow: visible;
+  }
+  .topbar,
+  .card,
+  .list-card,
+  .list-row,
+  .ticket-card,
+  .customer-card {
+    min-width: 0;
+  }
+  .button-row {
+    min-width: 0;
+  }
+  .button-row button {
+    max-width: 100%;
+    white-space: normal;
+  }
+  .inbox-pill,
+  .ticket-status-pill,
+  .ticket-priority-pill,
+  .ticket-soft-pill,
+  .customer-opt-pill,
+  .config-badge,
+  .pill {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .table-wrap,
+  .list,
+  .inbox-list,
+  .conversation-scroll {
+    max-width: 100%;
+  }
+  .dev-flyout-panel {
+    left: .75rem !important;
+    right: .75rem;
+    top: 5rem !important;
+    width: auto;
+    max-width: calc(100vw - 1.5rem);
+  }
+}
+@media (prefers-reduced-motion: reduce) { .auth-page::before, .auth-page::after, .auth-card, .auth-card-head, .auth-subtitle, .auth-headline span, .auth-topline, .auth-mode-switch, .auth-mode-switch::before, .auth-form, .auth-signup-fields, .auth-error, .auth-visual-panel, .auth-tech-line, .auth-hero-placeholder, .auth-hero-label, .auth-ambient, .auth-orbit, .auth-core-object, .auth-core-ring, .auth-core-panel, .auth-dashboard-float, .auth-dashboard-mock, .mock-card, .mock-status-dot, .mock-message-row::after, .mock-channel-line::after, .mock-progress-line::after, .auth-submit, .auth-mode-switch button, .auth-form input, .sidebar, .mobile-nav-backdrop, .mobile-menu-button, .page-transition, .handoff-toast, .nav-alert-dot, .card, .sidebar nav button, .onboarding-runtime-card, .onboarding-progress-track i, .onboarding-steps button, .onboarding-save-message, .inbox-panel, .inbox-row, .inbox-row-animated, .reply-input, .send-chip, .inbox-action-row button, .ticket-card, .ticket-actions button, .ticket-filter-tabs button, .customer-card { animation: none; transition: none; } .ticket-card { opacity: 1; transform: none; filter: none; } .conversation-scroll { scroll-behavior: auto; } }
 
 /* batch 5 uat + operations polish */
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }

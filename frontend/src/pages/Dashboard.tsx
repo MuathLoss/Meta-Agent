@@ -140,6 +140,12 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   const logoUrl = resolveAssetUrl(tenant?.brand.logo_url);
   const hasComplaintAlert = inbox.some((row) => row.last_intent === 'COMPLAINT' && row.state !== 'CLOSED');
   const activePageKey = tab === 'dev' ? `dev-${devView}` : tab;
+  const currentPageTitle = tab === 'dev'
+    ? devView === 'uat' ? 'UAT tests' : devView === 'handoff' ? 'Final handoff' : 'Deployment'
+    : tabs.find((item) => item.key === tab)?.label || 'Dashboard';
+  const primaryTabs = tabs.slice(0, 3);
+  const workspaceTabs = tabs.slice(3, 10);
+  const systemTabs = tabs.slice(10);
 
   function updateInboxState(rows: InboxItem[]) {
     setInbox(rows);
@@ -258,19 +264,32 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
               ? <img src={logoUrl} alt={`${tenantName} logo`} className="brand-mark-image" />
               : initialsFromName(tenantName)}
           </div>
-          <div><h2>Agent Platform</h2><p>{tenantSlug}</p></div>
+          <div><span className="brand-kicker">[Workspace]</span><h2>Agent Platform</h2><p>{tenantSlug}</p></div>
         </div>
         <nav>
-          {tabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}{t.key === 'inbox' && hasComplaintAlert && <span className="nav-alert-dot" aria-hidden="true" />}</span></button>)}
-          <div className="sidebar-flyout-wrap">
-            <button ref={devButtonRef} className={tab === 'dev' ? 'active' : ''} onClick={() => { setTab('dev'); setDevMenuOpen((current) => !current); }}>
-              <span className="nav-button-label">Dev</span>
-            </button>
+          <div className="nav-section">
+            <span className="nav-section-label">Operate</span>
+            {primaryTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}{t.key === 'inbox' && hasComplaintAlert && <span className="nav-alert-dot" aria-hidden="true" />}</span></button>)}
+          </div>
+          <div className="nav-section">
+            <span className="nav-section-label">Configure</span>
+            {workspaceTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
+          </div>
+          <div className="nav-section">
+            <span className="nav-section-label">System</span>
+            {systemTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
+            <div className="sidebar-flyout-wrap">
+              <button ref={devButtonRef} className={tab === 'dev' ? 'active' : ''} onClick={() => { setTab('dev'); setDevMenuOpen((current) => !current); }}>
+                <span className="nav-button-label">Dev</span>
+              </button>
+            </div>
           </div>
         </nav>
-        <button className="secondary" onClick={refreshAll}>Refresh</button>
-        <button className="secondary" onClick={onLogout}>Log out</button>
-        <button onClick={() => { setDeleteAccountPassword(''); setConfirmDeleteAccount(true); }} disabled={deletingAccount}>Delete account</button>
+        <div className="sidebar-actions">
+          <button className="secondary" onClick={refreshAll}>Refresh</button>
+          <button className="secondary" onClick={onLogout}>Log out</button>
+          <button onClick={() => { setDeleteAccountPassword(''); setConfirmDeleteAccount(true); }} disabled={deletingAccount}>Delete account</button>
+        </div>
       </aside>
       {devMenuOpen && devMenuPosition && <div className="dev-menu-overlay" onClick={() => setDevMenuOpen(false)}>
         <div className="dev-flyout-panel" style={{ top: `${devMenuPosition.top}px`, left: `${devMenuPosition.left}px` }} onClick={(e) => e.stopPropagation()}>
@@ -288,8 +307,11 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
       <section className="content">
         {handoffToast?.visible && <div className="handoff-toast" role="status" aria-live="polite"><strong>Client waiting in handoff</strong><span>{handoffToast.count > 1 ? `${handoffToast.count} conversations need attention` : 'A conversation needs your response'}</span></div>}
         <header className="topbar">
-          <div><p className="eyebrow">Tenant control plane</p><h1>{tenantName}</h1><p className="muted">Logged in as {session.user.full_name}</p></div>
-          <div className="user-pill">{loading ? 'Loading...' : tenant?.status || 'active'}</div>
+          <div><p className="eyebrow">Tenant control plane / {currentPageTitle}</p><h1>{tenantName}</h1><p className="muted">Logged in as {session.user.full_name}</p></div>
+          <div className="topbar-meta">
+            <div className="workspace-pill"><span>Workspace</span><strong>{tenantSlug}</strong></div>
+            <div className="user-pill">{loading ? 'Loading...' : tenant?.status || 'active'}</div>
+          </div>
         </header>
         {boxError(error)}
         <div key={activePageKey} className="page-transition">

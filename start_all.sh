@@ -77,6 +77,11 @@ try_start_postgres_with_brew() {
     postgresql@13
   )
 
+  if [[ "${START_POSTGRES_WITH_BREW:-0}" != "1" ]]; then
+    log "Skipping Homebrew PostgreSQL auto-start. Set START_POSTGRES_WITH_BREW=1 to enable it."
+    return 1
+  fi
+
   command -v brew >/dev/null 2>&1 || return 1
 
   for candidate in "${candidates[@]}"; do
@@ -166,9 +171,9 @@ start_service() {
 
   log "Starting $name..."
 
-  bash -lc "$command" \
-    > >(sed -u "s/^/[$name] /") \
-    2> >(sed -u "s/^/[$name] /" >&2) &
+  (
+    bash -lc "$command" 2>&1 | sed -u "s/^/[$name] /"
+  ) &
   pid=$!
 
   sleep 1

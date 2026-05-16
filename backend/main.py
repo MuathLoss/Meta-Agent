@@ -27,6 +27,7 @@ app.add_middleware(
         "Authorization",
         "Content-Type",
         "Origin",
+        "X-Tenant-Slug",
         "X-Hub-Signature-256",
         "X-Requested-With",
         "X-Telegram-Bot-Api-Secret-Token",

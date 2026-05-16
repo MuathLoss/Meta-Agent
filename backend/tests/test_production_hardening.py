@@ -83,3 +83,18 @@ def test_security_headers_are_present_on_api_response():
     assert response.headers["X-Frame-Options"] == "DENY"
     assert response.headers["Referrer-Policy"] == "no-referrer"
     assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_cors_preflight_allows_frontend_tenant_header():
+    response = TestClient(main.app).options(
+        "/tenants/current",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization,content-type,x-tenant-slug",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert "X-Tenant-Slug" in response.headers["access-control-allow-headers"]

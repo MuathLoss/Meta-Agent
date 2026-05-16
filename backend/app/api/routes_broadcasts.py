@@ -23,6 +23,15 @@ class BroadcastCreateRequest(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
+class BroadcastUpdateRequest(BaseModel):
+    title: str | None = None
+    channel_type: str | None = None
+    template_ref: str | None = None
+    audience_type: str | None = None
+    schedule_at: datetime | None = None
+    payload: dict | None = None
+
+
 class BroadcastScheduleRequest(BaseModel):
     schedule_at: datetime
 
@@ -46,6 +55,7 @@ def list_broadcasts(db: Session = Depends(get_db), tenant: Tenant = Depends(get_
         "audience_type": b.audience_type,
         "schedule_at": b.schedule_at.isoformat() if b.schedule_at else None,
         "created_at": b.created_at.isoformat() if b.created_at else None,
+        "message_text": (b.payload_json or {}).get("message_text"),
     } for b in rows]
 
 
@@ -64,6 +74,39 @@ def create_broadcast(payload: BroadcastCreateRequest, db: Session = Depends(get_
         payload_json=payload.payload,
     )
     db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "status": row.status}
+
+
+@router.put("/{broadcast_id}")
+def update_broadcast(broadcast_id: int, payload: BroadcastUpdateRequest, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), ctx: dict = Depends(require_tenant_roles(ROLE_BUSINESS_ADMIN, ROLE_BROADCAST_OPERATOR))):
+    row = _get_broadcast(db, tenant.id, broadcast_id)
+    if row.status in {"sending", "sent"}:
+        raise HTTPException(status_code=400, detail="Sent broadcasts cannot be edited")
+    updated_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
+    if "title" in updated_fields and payload.title is not None:
+        row.title = payload.title
+    if "channel_type" in updated_fields and payload.channel_type is not None:
+        row.channel_type = payload.channel_type
+    if "template_ref" in updated_fields:
+        row.template_ref = payload.template_ref
+    if "audience_type" in updated_fields and payload.audience_type is not None:
+        row.audience_type = payload.audience_type
+    if "schedule_at" in updated_fields:
+        row.schedule_at = payload.schedule_at
+        if payload.schedule_at is not None:
+            row.status = "scheduled"
+    if "payload" in updated_fields and payload.payload is not None:
+        row.payload_json = {**(row.payload_json or {}), **payload.payload}
+    db.add(AuditLog(
+        tenant_id=tenant.id,
+        actor_user_id=ctx["user"].id,
+        action="broadcast.updated",
+        entity_type="broadcast",
+        entity_id=str(row.id),
+        details_json={"status": row.status, "channel_type": row.channel_type, "title": row.title},
+    ))
     db.commit()
     db.refresh(row)
     return {"id": row.id, "status": row.status}

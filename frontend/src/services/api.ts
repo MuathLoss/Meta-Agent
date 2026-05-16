@@ -62,6 +62,7 @@ export type Broadcast = {
   status: string;
   channel_type: string;
   template_ref?: string | null;
+  message_text?: string | null;
   audience_type?: string;
   schedule_at?: string | null;
   created_at?: string | null;
@@ -143,6 +144,7 @@ export const api = {
   updateTicket: (token: string, tenantSlug: string, id: number, payload: Partial<Ticket>) => request(`/tickets/${id}`, { method: 'PUT', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   broadcasts: (token: string, tenantSlug: string) => request<Broadcast[]>('/broadcasts', auth(token, tenantSlug)),
   createBroadcast: (token: string, tenantSlug: string, payload: { title: string; template_ref?: string | null; audience_type?: string; channel_type?: string; payload?: Record<string, unknown> }) => request('/broadcasts', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
+  updateBroadcast: (token: string, tenantSlug: string, id: number, payload: { title?: string; template_ref?: string | null; audience_type?: string; channel_type?: string; payload?: Record<string, unknown> }) => request(`/broadcasts/${id}`, { method: 'PUT', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   sendBroadcast: (token: string, tenantSlug: string, id: number) => request<{ broadcast_id: number; status: string; total_recipients: number; created_recipients: number; failed_recipients: number; sent_recipients: number; channel_type?: string | null }>(`/broadcasts/${id}/send`, { method: 'POST', ...auth(token, tenantSlug) }),
   deleteBroadcast: (token: string, tenantSlug: string, id: number) => request<{ deleted: boolean; id: number }>(`/broadcasts/${id}`, { method: 'DELETE', ...auth(token, tenantSlug) }),
   broadcastRecipients: (token: string, tenantSlug: string, id: number) => request<BroadcastRecipient[]>(`/broadcasts/${id}/recipients`, auth(token, tenantSlug)),

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   api,
   resolveAssetUrl,
@@ -2702,25 +2703,76 @@ function Broadcasts({ rows, token, tenantSlug, reload }: { rows: Broadcast[]; to
   const [messageText, setMessageText] = useState('');
   const [channelType, setChannelType] = useState('auto');
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [editingBroadcast, setEditingBroadcast] = useState<Broadcast | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editTemplate, setEditTemplate] = useState('');
+  const [editMessageText, setEditMessageText] = useState('');
+  const [editChannelType, setEditChannelType] = useState('auto');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [recipients, setRecipients] = useState<BroadcastRecipient[]>([]);
   const [statusText, setStatusText] = useState<string | null>(null);
+  const statusClass = (value?: string | null) => (value || 'draft').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const draftCount = rows.filter((row) => ['draft', 'created', 'queued'].includes(statusClass(row.status))).length;
+  const sentCount = rows.filter((row) => ['sent', 'completed', 'delivered'].includes(statusClass(row.status))).length;
+  const selectedBroadcast = rows.find((row) => row.id === selectedId) || null;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    await api.createBroadcast(token, tenantSlug, {
+    const payload = {
       title,
       template_ref: template || null,
       audience_type: 'all',
       channel_type: channelType,
       payload: { message_text: messageText },
-    });
+    };
+    await api.createBroadcast(token, tenantSlug, payload);
+    setStatusText('Broadcast draft created');
     setTitle('');
     setTemplate('');
     setMessageText('');
     setChannelType('auto');
-    setStatusText('Broadcast draft created');
     await reload();
+  }
+
+  function editBroadcast(row: Broadcast) {
+    setEditingBroadcast(row);
+    setEditTitle(row.title);
+    setEditTemplate(row.template_ref || '');
+    setEditMessageText(row.message_text || '');
+    setEditChannelType(row.channel_type || 'auto');
+  }
+
+  function cancelEdit(clearStatus = true) {
+    setEditingBroadcast(null);
+    setEditTitle('');
+    setEditTemplate('');
+    setEditMessageText('');
+    setEditChannelType('auto');
+    if (clearStatus) setStatusText(null);
+  }
+
+  async function submitEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingBroadcast) return;
+    const editId = editingBroadcast.id;
+    setBusyId(editId);
+    setStatusText(null);
+    try {
+      await api.updateBroadcast(token, tenantSlug, editId, {
+        title: editTitle,
+        template_ref: editTemplate || null,
+        audience_type: 'all',
+        channel_type: editChannelType,
+        payload: { message_text: editMessageText },
+      });
+      setStatusText(`Broadcast ${editId} updated`);
+      cancelEdit(false);
+      await reload();
+    } catch (err) {
+      setStatusText(err instanceof Error ? err.message : 'Broadcast update failed');
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function openRecipients(broadcastId: number) {
@@ -2766,47 +2818,94 @@ function Broadcasts({ rows, token, tenantSlug, reload }: { rows: Broadcast[]; to
     }
   }
 
-  return <section className="grid two broadcasts-layout">
-    <form className="card form-stack broadcast-form-card" onSubmit={submit}>
-      <p className="eyebrow">Broadcasts</p>
-      <h3>Create campaign</h3>
-      <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+  return <>
+  <section className="grid two broadcasts-layout">
+    <form className="card form-stack broadcast-form-card campaign-form-card" onSubmit={submit}>
+      <div className="campaign-form-head">
+        <div><p className="eyebrow">Broadcasts</p><h3>Create campaign</h3><p className="muted">Prepare tenant-safe messaging for the selected channel.</p></div>
+        <span className="campaign-mode-pill">Draft</span>
+      </div>
+      <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Campaign title" /></label>
       <label>Message text<textarea placeholder="Write the real broadcast message to send through the tenant channel" value={messageText} onChange={(e) => setMessageText(e.target.value)} /></label>
-      <label>Template reference<input value={template} onChange={(e) => setTemplate(e.target.value)} /></label>
-      <label>Channel preference<select value={channelType} onChange={(e) => setChannelType(e.target.value)}><option value="auto">auto</option><option value="whatsapp">whatsapp</option><option value="telegram">telegram</option></select></label>
-      <button>Create draft</button>
-      {statusText && <p className="muted">{statusText}</p>}
+      <div className="campaign-form-grid">
+        <label>Template reference<input value={template} onChange={(e) => setTemplate(e.target.value)} placeholder="Optional template key" /></label>
+        <label>Channel preference<select value={channelType} onChange={(e) => setChannelType(e.target.value)}><option value="auto">auto</option><option value="whatsapp">whatsapp</option><option value="telegram">telegram</option></select></label>
+      </div>
+      <div className="campaign-form-actions">
+        <button className="campaign-primary-action">Create draft</button>
+      </div>
+      {statusText && <div className={`broadcast-status-note ${statusText.toLowerCase().includes('failed') ? 'error' : 'success'}`} role="status">{statusText}</div>}
     </form>
-    <div className="card broadcast-list-card">
-      <h3>Campaigns</h3>
-      <div className="list">
-        {rows.length === 0 && <p className="muted">No campaigns yet.</p>}
-        {rows.map((row) => <div className="list-card broadcast-card" key={row.id}>
-          <button className="close-chip" type="button" aria-label={`Delete ${row.title}`} disabled={busyId === row.id} onClick={() => void deleteNow(row.id)}>x</button>
-          <b>{row.title}</b>
-          <p>{row.status} · channel {row.channel_type}</p>
-            <small>{row.template_ref || 'No template reference'}</small>
-            <div className="button-row">
+    <div className="card broadcast-list-card campaign-list-card">
+      <div className="campaign-list-head">
+        <div><p className="eyebrow">Campaign queue</p><h3>Campaigns</h3></div>
+        <div className="campaign-summary">
+          <div><small>Draft</small><strong>{draftCount}</strong></div>
+          <div><small>Sent</small><strong>{sentCount}</strong></div>
+          <div><small>Total</small><strong>{rows.length}</strong></div>
+        </div>
+      </div>
+      {rows.length === 0 && <div className="broadcast-empty-state"><strong>No campaigns yet</strong><p>Create a draft campaign to prepare tenant-scoped outbound messaging.</p></div>}
+      <div className="broadcast-card-grid">
+        {rows.map((row) => <article className={`broadcast-card campaign-card campaign-status-${statusClass(row.status)}`} key={row.id}>
+          <button className="close-chip campaign-delete-chip" type="button" aria-label={`Delete ${row.title}`} disabled={busyId === row.id} onClick={() => void deleteNow(row.id)}>x</button>
+          <div className="campaign-card-top">
+            <div><span className="campaign-id">#{row.id}</span><h4>{row.title}</h4></div>
+            <span className={`campaign-status-pill ${statusClass(row.status)}`}>{row.status}</span>
+          </div>
+          <div className="campaign-badges">
+            <span>{row.channel_type || 'auto channel'}</span>
+            <span>{row.audience_type || 'all audience'}</span>
+            {row.schedule_at && <span>Scheduled {formatMessageTime(row.schedule_at)}</span>}
+          </div>
+          <div className="campaign-meta-grid">
+            <div><small>Template</small><strong>{row.template_ref || 'No template'}</strong></div>
+            <div><small>Status</small><strong>{row.status}</strong></div>
+            <div><small>Created</small><strong>{formatMessageTime(row.created_at)}</strong></div>
+          </div>
+          <div className="button-row campaign-actions">
             <button disabled={busyId === row.id || row.status === 'sending'} onClick={() => void sendNow(row.id)}>
               {busyId === row.id ? 'Sending...' : 'Send'}
             </button>
+            <button className="secondary" disabled={row.status === 'sending' || row.status === 'sent'} onClick={() => editBroadcast(row)}>Edit</button>
             <button className="secondary" onClick={() => void openRecipients(row.id)}>{selectedId === row.id ? 'Hide recipients' : 'Recipients'}</button>
           </div>
-        </div>)}
+        </article>)}
       </div>
-      {selectedId && <div className="card" style={{ marginTop: '1rem' }}>
-        <h4>Recipient results</h4>
-        <div className="list">
-          {recipients.length === 0 && <p className="muted">No tracked recipients yet.</p>}
-          {recipients.map((recipient) => <div className="list-card" key={recipient.id}>
-            <b>Customer #{recipient.customer_id}</b>
-            <p>{recipient.status}</p>
-            <small>{recipient.provider_message_id || 'No provider message id yet'}</small>
+      {selectedId && <div className="recipient-results-panel">
+        <div className="recipient-results-head">
+          <div><p className="eyebrow">Recipient results</p><h4>{selectedBroadcast?.title || `Broadcast #${selectedId}`}</h4></div>
+          <span className="campaign-mode-pill">{recipients.length} tracked</span>
+        </div>
+        {recipients.length === 0 && <div className="broadcast-empty-state compact"><strong>No tracked recipients yet</strong><p>Recipient delivery status appears after a campaign is sent.</p></div>}
+        <div className="recipient-grid">
+          {recipients.map((recipient) => <div className="recipient-card" key={recipient.id}>
+            <div><strong>Customer #{recipient.customer_id}</strong><span className={`recipient-status-pill ${statusClass(recipient.status)}`}>{recipient.status}</span></div>
+            <small>{recipient.delivered_at ? `Delivered ${formatMessageTime(recipient.delivered_at)}` : 'Delivery timestamp pending'}</small>
           </div>)}
         </div>
       </div>}
     </div>
-  </section>;
+  </section>
+  {typeof document !== 'undefined' && editingBroadcast && createPortal(<div className="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="broadcast-edit-title">
+    <form className="confirm-card broadcast-edit-card form-stack" onSubmit={submitEdit}>
+      <div className="campaign-form-head">
+        <div><p className="eyebrow">Edit broadcast</p><h3 id="broadcast-edit-title">Campaign #{editingBroadcast.id}</h3><p className="muted">Update this campaign before it is sent.</p></div>
+        <span className={`campaign-status-pill ${statusClass(editingBroadcast.status)}`}>{editingBroadcast.status}</span>
+      </div>
+      <label>Title<input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Campaign title" /></label>
+      <label>Message text<textarea placeholder="Write the real broadcast message to send through the tenant channel" value={editMessageText} onChange={(e) => setEditMessageText(e.target.value)} /></label>
+      <div className="campaign-form-grid">
+        <label>Template reference<input value={editTemplate} onChange={(e) => setEditTemplate(e.target.value)} placeholder="Optional template key" /></label>
+        <label>Channel preference<select value={editChannelType} onChange={(e) => setEditChannelType(e.target.value)}><option value="auto">auto</option><option value="whatsapp">whatsapp</option><option value="telegram">telegram</option></select></label>
+      </div>
+      <div className="button-row">
+        <button type="submit" disabled={busyId === editingBroadcast.id}>{busyId === editingBroadcast.id ? 'Saving...' : 'Save changes'}</button>
+        <button className="secondary" type="button" onClick={() => cancelEdit()} disabled={busyId === editingBroadcast.id}>Cancel</button>
+      </div>
+    </form>
+  </div>, document.body)}
+  </>;
 }
 
 function SimpleRows<T extends object>({ rows }: { rows: T[] }) {

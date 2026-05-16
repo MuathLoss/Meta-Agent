@@ -620,13 +620,18 @@ function RuntimeChatPreview({ message, analysis }: { message: string; analysis: 
   </div>;
 }
 
-function Inbox({ rows, conversation, openConversation, handoff, resolve, reopen, sendReply }: { rows: InboxItem[]; selectedConversationId: number | null; conversation: ConversationDetail | null; openConversation: (id: number) => Promise<void>; handoff: (id: number) => Promise<void>; resolve: (id: number) => Promise<void>; reopen: (id: number) => Promise<void>; sendReply: (id: number, text: string) => Promise<void> }) {
+function Inbox({ rows, selectedConversationId, conversation, openConversation, handoff, resolve, reopen, sendReply }: { rows: InboxItem[]; selectedConversationId: number | null; conversation: ConversationDetail | null; openConversation: (id: number) => Promise<void>; handoff: (id: number) => Promise<void>; resolve: (id: number) => Promise<void>; reopen: (id: number) => Promise<void>; sendReply: (id: number, text: string) => Promise<void> }) {
   const [replyText, setReplyText] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
   const hasComplaintMarker = (metadata?: Record<string, unknown>, lastIntent?: string | null, state?: string) => state !== 'CLOSED' && (lastIntent === 'COMPLAINT' || metadata?.has_open_complaint === true);
+  const displayCustomer = (item: InboxItem | ConversationDetail) => {
+    if ('customer' in item) return item.customer.name || item.customer.phone || 'Customer';
+    return item.customer_name || item.customer_phone || 'Customer';
+  };
+  const messageLabel = (direction: string) => direction === 'outbound' ? 'Team reply' : direction === 'system' ? 'System' : 'Customer';
   const sortedRows = [...rows].sort((a, b) => {
     const aTime = a.updated_at ? Date.parse(a.updated_at) : 0;
     const bTime = b.updated_at ? Date.parse(b.updated_at) : 0;
@@ -669,7 +674,59 @@ function Inbox({ rows, conversation, openConversation, handoff, resolve, reopen,
     }
   }
 
-  return <section className="split inbox-layout"><div className="card inbox-panel"><p className="eyebrow">Inbox</p><h3>Conversations</h3>{rows.length === 0 && <p className="muted">No conversations yet. Run preview first.</p>}<div className="list inbox-list">{sortedRows.map((r, index) => <button className="list-row inbox-row-animated" style={{ animationDelay: `${Math.min(index * 40, 240)}ms` }} key={r.id} onClick={() => void openConversation(r.id)}><strong>{r.customer_phone}</strong><div className="inbox-badges">{hasComplaintMarker(r.metadata_json, r.last_intent, r.state) && <span className="priority-dot" aria-hidden="true" />}<span className="inbox-pill">{r.state}</span><span className="inbox-pill secondary-pill">{r.last_intent || 'UNKNOWN'}</span></div><small>{r.last_message || 'No messages'}</small></button>)}</div></div><div className="card detail-card inbox-panel"><p className="eyebrow">Conversation view</p>{conversation ? <><h3>{conversation.customer.phone}</h3><div className="inbox-badges">{hasComplaintMarker(conversation.conversation.metadata_json, conversation.conversation.last_intent, conversation.conversation.state) && <span className="priority-dot" aria-hidden="true" />}<span className="inbox-pill">{conversation.conversation.state}</span><span className="inbox-pill secondary-pill">{conversation.conversation.last_intent || 'UNKNOWN'}</span><span className="inbox-pill secondary-pill">Owner: {conversation.conversation.owner_ref || 'none'}</span></div><div className="button-row"><button onClick={() => void handoff(conversation.conversation.id)}>Handoff</button><button className="secondary" onClick={() => void resolve(conversation.conversation.id)}>Resolve</button><button className="secondary" onClick={() => void reopen(conversation.conversation.id)}>Reset bot</button></div><div ref={scrollRef} className="timeline conversation-scroll">{conversation.messages.map((m) => <div key={m.id} className={`message ${m.direction}`}><b>{m.direction}</b><p>{m.text}</p><div className="message-meta"><small>{m.intent_code || ''}</small><span className="message-time">{formatMessageTime(m.created_at)}</span></div></div>)}</div><div className="reply-composer-wrap">{replyError && <div className="reply-error">{replyError}</div>}<div className="reply-composer"><textarea ref={replyInputRef} className="reply-input" placeholder="Type your reply..." value={replyText} onChange={(e) => setReplyText(e.target.value)} onKeyDown={onReplyKeyDown} disabled={sendingReply} rows={1} /><button className="send-chip" onClick={() => void submitReply()} disabled={sendingReply || !replyText.trim()} aria-label="Send reply">↑</button></div><small className="reply-hint">Press Enter to send. Use Shift+Enter for a new line.</small></div></> : <p className="muted">Select a conversation.</p>}</div></section>;
+  return <section className="split inbox-layout">
+    <div className="card inbox-panel inbox-list-panel">
+      <div className="inbox-panel-head">
+        <div><p className="eyebrow">Inbox</p><h3>Conversations</h3></div>
+        <span className="inbox-count">{rows.length}</span>
+      </div>
+      {rows.length === 0 && <div className="inbox-empty-state"><strong>No conversations yet</strong><p>New customer messages will appear here when the workspace receives them.</p></div>}
+      <div className="list inbox-list">
+        {sortedRows.map((r, index) => {
+          const isActive = selectedConversationId === r.id;
+          const owner = r.owner_ref || r.owner_type || 'unassigned';
+          return <button className={`list-row inbox-row inbox-row-animated${isActive ? ' active' : ''}`} aria-current={isActive ? 'true' : undefined} style={{ animationDelay: `${Math.min(index * 40, 240)}ms` }} key={r.id} onClick={() => void openConversation(r.id)}>
+            <span className="inbox-row-top">
+              <span className="inbox-customer">
+                <strong>{displayCustomer(r)}</strong>
+                <small>{r.customer_phone}</small>
+              </span>
+              <span className="inbox-time">{formatMessageTime(r.updated_at)}</span>
+            </span>
+            <span className="inbox-preview">{r.last_message || 'No messages yet'}</span>
+            <span className="inbox-badges">{hasComplaintMarker(r.metadata_json, r.last_intent, r.state) && <span className="priority-dot" aria-hidden="true" />}<span className="inbox-pill">{r.state}</span><span className="inbox-pill secondary-pill">{r.last_intent || 'UNKNOWN'}</span><span className="inbox-pill secondary-pill">Owner: {owner}</span></span>
+          </button>;
+        })}
+      </div>
+    </div>
+    <div className="card detail-card inbox-panel conversation-panel">
+      <p className="eyebrow">Conversation view</p>
+      {conversation ? <>
+        <div className="conversation-head">
+          <div>
+            <h3>{displayCustomer(conversation)}</h3>
+            <p>{conversation.customer.phone}{conversation.customer.email ? ` / ${conversation.customer.email}` : ''}</p>
+          </div>
+          <div className="inbox-badges conversation-status">{hasComplaintMarker(conversation.conversation.metadata_json, conversation.conversation.last_intent, conversation.conversation.state) && <span className="priority-dot" aria-hidden="true" />}<span className="inbox-pill">{conversation.conversation.state}</span><span className="inbox-pill secondary-pill">{conversation.conversation.channel_type}</span></div>
+        </div>
+        <div className="conversation-context-grid">
+          <div><small>Intent</small><strong>{conversation.conversation.last_intent || 'UNKNOWN'}</strong></div>
+          <div><small>Owner</small><strong>{conversation.conversation.owner_ref || conversation.conversation.owner_type || 'unassigned'}</strong></div>
+          <div><small>Customer</small><strong>{conversation.customer.opt_in ? 'Opted in' : 'Opt-out or unknown'}</strong></div>
+        </div>
+        <div className="button-row inbox-action-row"><button onClick={() => void handoff(conversation.conversation.id)}>Handoff</button><button className="secondary" onClick={() => void resolve(conversation.conversation.id)}>Resolve</button><button className="secondary" onClick={() => void reopen(conversation.conversation.id)}>Reset bot</button></div>
+        <div ref={scrollRef} className="timeline conversation-scroll">
+          {conversation.messages.length === 0 && <div className="inbox-empty-state compact"><strong>No messages yet</strong><p>The conversation timeline will appear here.</p></div>}
+          {conversation.messages.map((m) => <div key={m.id} className={`message ${m.direction}`}>
+            <b>{messageLabel(m.direction)}</b>
+            <p>{m.text || ''}</p>
+            <div className="message-meta"><small>{m.intent_code || 'No intent'}</small><span className="message-time">{formatMessageTime(m.created_at)}</span></div>
+          </div>)}
+        </div>
+        <div className="reply-composer-wrap">{replyError && <div className="reply-error">{replyError}</div>}<div className="reply-composer"><textarea ref={replyInputRef} className="reply-input" placeholder="Write a clear reply to the customer..." value={replyText} onChange={(e) => setReplyText(e.target.value)} onKeyDown={onReplyKeyDown} disabled={sendingReply} rows={1} /><button className="send-chip" onClick={() => void submitReply()} disabled={sendingReply || !replyText.trim()} aria-label="Send reply">↑</button></div><small className="reply-hint">Press Enter to send. Use Shift+Enter for a new line.</small></div>
+      </> : <div className="inbox-empty-state conversation-empty"><strong>Select a conversation</strong><p>Choose a customer thread from the inbox to review messages, routing context, and actions.</p></div>}
+    </div>
+  </section>;
 }
 
 function UatPanel({ token, tenantSlug }: { token: string; tenantSlug: string }) {

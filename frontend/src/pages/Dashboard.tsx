@@ -2494,7 +2494,42 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
 }
 
 function Tickets({ rows, token, tenantSlug, reload, openConversation }: { rows: Ticket[]; token: string; tenantSlug: string; reload: () => Promise<void>; openConversation: (id: number) => Promise<void> }) {
-  return <section className="card"><p className="eyebrow">Tickets</p><h3>Queues and escalations</h3><div className="list">{rows.length === 0 && <p className="muted">No tickets yet.</p>}{rows.map((t) => <div className="list-card" key={t.id}><b>#{t.id} {t.ticket_type}</b><p>{t.priority} · {t.status} · assigned to {t.assigned_to || 'unassigned'}</p><div className="button-row"><button onClick={() => void openConversation(t.conversation_id)}>Open conversation</button><button className="secondary" onClick={async () => { await api.updateTicket(token, tenantSlug, t.id, { status: 'resolved' }); await reload(); }}>Resolve</button></div></div>)}</div></section>;
+  const statusClass = (value: string) => value.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const openCount = rows.filter((row) => row.status !== 'resolved').length;
+  const escalatedCount = rows.filter((row) => row.priority === 'high' || row.priority === 'urgent' || row.status === 'escalated').length;
+
+  return <section className="card tickets-page">
+    <div className="tickets-head">
+      <div><p className="eyebrow">Tickets</p><h3>Queues and escalations</h3><p className="muted">Track handoffs, complaints, finance, certificate, and supervisor review cases.</p></div>
+      <div className="tickets-summary">
+        <div><small>Open</small><strong>{openCount}</strong></div>
+        <div><small>Escalated</small><strong>{escalatedCount}</strong></div>
+        <div><small>Total</small><strong>{rows.length}</strong></div>
+      </div>
+    </div>
+    {rows.length === 0 && <div className="tickets-empty-state"><strong>No tickets yet</strong><p>Escalations and human-review cases will appear here when conversations require operational follow-up.</p></div>}
+    <div className="tickets-grid">
+      {rows.map((t, index) => <article className={`ticket-card ticket-status-${statusClass(t.status)} ticket-priority-${statusClass(t.priority)}`} style={{ animationDelay: `${Math.min(index * 45, 260)}ms` }} key={t.id}>
+        <div className="ticket-card-top">
+          <div>
+            <span className="ticket-id">#{t.id}</span>
+            <h4>{t.ticket_type || 'general'}</h4>
+          </div>
+          <span className={`ticket-status-pill ${statusClass(t.status)}`}>{t.status}</span>
+        </div>
+        <div className="ticket-badge-row">
+          <span className={`ticket-priority-pill ${statusClass(t.priority)}`}>{t.priority} priority</span>
+          <span className="ticket-soft-pill">Conversation #{t.conversation_id}</span>
+        </div>
+        <div className="ticket-meta-grid">
+          <div><small>Assignee</small><strong>{t.assigned_to || 'unassigned'}</strong></div>
+          <div><small>Type</small><strong>{t.ticket_type || 'general'}</strong></div>
+          <div><small>Status</small><strong>{t.status}</strong></div>
+        </div>
+        <div className="button-row ticket-actions"><button onClick={() => void openConversation(t.conversation_id)}>Open conversation</button><button className="secondary ticket-resolve-button" onClick={async () => { await api.updateTicket(token, tenantSlug, t.id, { status: 'resolved' }); await reload(); }}>Resolve</button></div>
+      </article>)}
+    </div>
+  </section>;
 }
 
 function Customers({ rows }: { rows: Customer[] }) { return <SimpleTable title="Customers" rows={rows} />; }

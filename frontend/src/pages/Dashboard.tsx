@@ -1303,6 +1303,8 @@ function behaviorSummaryLabel(value: string) {
 
 function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }: { faq: FaqItem[]; intents: IntentItem[]; routing: RoutingRule[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {
   const items = useMemo(() => buildKnowledgeItems(faq, intents, routing), [faq, intents, routing]);
+  const [knowledgeSearch, setKnowledgeSearch] = useState('');
+  const [knowledgeStatusFilter, setKnowledgeStatusFilter] = useState<'all' | 'active' | 'inactive' | 'archived'>('all');
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
   const [saving, setSaving] = useState(false);
@@ -1573,23 +1575,63 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
   const summaryIntentCode = normalizeIntentCode(summaryTopic);
   const summaryPromptsAr = splitTextareaItems(form.promptsAr);
   const summaryPromptsEn = splitTextareaItems(form.promptsEn);
+  const knowledgeQuery = knowledgeSearch.trim().toLowerCase();
+  const filteredItems = items.filter((item) => {
+    const matchesStatus = knowledgeStatusFilter === 'all' || item.status === knowledgeStatusFilter;
+    const searchable = [
+      item.responseName,
+      item.topicKey,
+      item.intentCode,
+      item.answerAr,
+      item.answerEn,
+      ...item.promptsAr,
+      ...item.promptsEn,
+      ...item.badges,
+    ].join(' ').toLowerCase();
+    return matchesStatus && (!knowledgeQuery || searchable.includes(knowledgeQuery));
+  });
+  const knowledgeCounts = {
+    active: items.filter((item) => item.status === 'active').length,
+    inactive: items.filter((item) => item.status === 'inactive').length,
+    archived: items.filter((item) => item.status === 'archived').length,
+  };
 
   return <section className={`knowledge-shell ${wizardOpen ? 'modal-open' : ''}`}>
-    <div className="knowledge-topbar">
-      <div>
-        <p className="eyebrow">Bot setup</p>
+    <div className="knowledge-topbar knowledge-premium-topbar">
+      <div className="knowledge-title-block">
+        <p className="eyebrow">Tenant knowledge base</p>
         <h3>Knowledge & Responses</h3>
-        <p className="muted">Create one clean bot response at a time. The system still saves FAQ, intents, keywords, and routing behind the scenes, and it will automatically reply in the customer&apos;s message language when that answer exists.</p>
+        <p className="muted">Manage approved answers safely. The system still saves FAQ, intents, keywords, and routing behind the scenes, and replies in the customer&apos;s message language when that answer exists.</p>
       </div>
-      <button onClick={openCreate}>Add new bot response</button>
+      <div className="knowledge-head-actions">
+        <div className="knowledge-stats">
+          <div><small>Active</small><strong>{knowledgeCounts.active}</strong></div>
+          <div><small>Inactive</small><strong>{knowledgeCounts.inactive}</strong></div>
+          <div><small>Archived</small><strong>{knowledgeCounts.archived}</strong></div>
+        </div>
+        <button onClick={openCreate}>Add new bot response</button>
+      </div>
+    </div>
+
+    <div className="knowledge-controls">
+      <label className="knowledge-search">Search approved answers
+        <input value={knowledgeSearch} onChange={(e) => setKnowledgeSearch(e.target.value)} placeholder="Search topic, answer, phrase, or intent" />
+      </label>
+      <div className="knowledge-filter-tabs" aria-label="Filter knowledge responses by status">
+        {(['all', 'active', 'inactive', 'archived'] as const).map((filter) => <button key={filter} type="button" className={knowledgeStatusFilter === filter ? 'active' : ''} onClick={() => setKnowledgeStatusFilter(filter)}>
+          {filter}
+          <span>{filter === 'all' ? items.length : knowledgeCounts[filter]}</span>
+        </button>)}
+      </div>
     </div>
 
     <div className="knowledge-cards-grid">
-      {items.length === 0 && <div className="card"><p className="muted">No bot responses yet. Add your first one to teach the assistant how to reply.</p></div>}
-      {items.map((item) => <article className="card knowledge-card" key={item.id}>
+      {items.length === 0 && <div className="card knowledge-empty-state"><strong>No approved answers yet</strong><p className="muted">Add the first response to teach the assistant how to answer a real customer question.</p></div>}
+      {items.length > 0 && filteredItems.length === 0 && <div className="card knowledge-empty-state"><strong>No matching responses</strong><p className="muted">Try another search term or switch the status filter.</p></div>}
+      {filteredItems.map((item) => <article className={`card knowledge-card knowledge-status-${item.status}`} key={item.id}>
         <div className="knowledge-card-head">
           <div>
-            <p className="eyebrow">Bot response</p>
+            <p className="eyebrow">Approved answer</p>
             <h3>{item.responseName}</h3>
             <p className="knowledge-card-code">{item.topicKey}</p>
           </div>
@@ -1598,14 +1640,15 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
             <span className={`config-status-pill ${item.status}`}>{item.status}</span>
           </div>
         </div>
+        <div className="knowledge-topic-strip">
+          <span>Intent {item.intentCode}</span>
+          <span>{item.responseMode === 'business_settings' ? 'Settings answer' : item.responseMode === 'custom' ? 'Custom answer' : 'FAQ answer'}</span>
+          <span>{item.faq ? `FAQ #${item.faq.id}` : 'No FAQ record'}</span>
+        </div>
         <div className="knowledge-summary-grid">
           <div>
             <small>What might customers ask?</small>
             <p>{summarizeText([...item.promptsAr, ...item.promptsEn].join(' • '), 180)}</p>
-          </div>
-          <div>
-            <small>What should the bot reply?</small>
-            <p>{item.responseMode === 'business_settings' ? 'Automatic from current business settings' : summarizeText(item.answerAr || item.answerEn, 180)}</p>
           </div>
           <div>
             <small>What happens after the reply?</small>
@@ -1616,13 +1659,23 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
             <p>{item.responseBehavior === 'normal' ? 'BOT only' : `${item.ownerRole} · ${item.ticketType || 'handoff'} · ${item.priority}`}</p>
           </div>
         </div>
+        <div className="knowledge-answer-grid">
+          <div className="knowledge-answer-card">
+            <div className="knowledge-answer-head"><small>Arabic answer</small><span>AR</span></div>
+            <p dir="auto">{item.responseMode === 'business_settings' ? 'Automatic from current business settings' : summarizeText(item.answerAr, 240)}</p>
+          </div>
+          <div className="knowledge-answer-card">
+            <div className="knowledge-answer-head"><small>English answer</small><span>EN</span></div>
+            <p>{item.responseMode === 'business_settings' ? 'Automatic from current business settings' : summarizeText(item.answerEn, 240)}</p>
+          </div>
+        </div>
         {item.badges.length > 0 && <div className="chip-cloud">
           {item.badges.map((badge) => <span key={badge} className="config-chip secondary-chip">{badge}</span>)}
         </div>}
-        <div className="button-row">
+        <div className="button-row knowledge-card-actions">
           <button type="button" className="secondary" onClick={() => openEdit(item)}>Edit</button>
           <button type="button" className="secondary" onClick={() => setPendingArchive(item)}>Archive</button>
-          <button type="button" onClick={() => setPendingDelete(item)}>Delete</button>
+          <button type="button" className="danger-action" onClick={() => setPendingDelete(item)}>Delete</button>
         </div>
       </article>)}
     </div>

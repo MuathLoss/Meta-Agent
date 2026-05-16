@@ -662,6 +662,203 @@ pre { overflow: auto; white-space: pre-wrap; border-radius: 16px; padding: 1rem;
   min-height: 44px;
   padding-inline: 1rem;
 }
+.onboarding-shell {
+  width: min(1320px, 100%);
+  display: grid;
+  gap: 1rem;
+  margin: 0 auto;
+}
+.onboarding-hero {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  gap: 1rem;
+  align-items: center;
+}
+.onboarding-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 88% 12%, rgba(127,29,29,.2), transparent 36%);
+}
+.onboarding-hero > * {
+  position: relative;
+  z-index: 1;
+}
+.onboarding-hero h3,
+.onboarding-form-card h3,
+.onboarding-review-card h3,
+.onboarding-runtime-card h3 {
+  margin: .15rem 0 .35rem;
+}
+.onboarding-progress-card {
+  display: grid;
+  gap: .45rem;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(248,113,113,.18);
+  background: rgba(255,255,255,.045);
+}
+.onboarding-progress-card span,
+.onboarding-progress-card small {
+  color: #a8a29e;
+  font-size: .76rem;
+  font-weight: 800;
+}
+.onboarding-progress-card strong {
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+}
+.onboarding-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+}
+.onboarding-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7f1d1d, #fca5a5);
+  box-shadow: 0 0 18px rgba(127,29,29,.3);
+  transition: width .28s ease;
+}
+.onboarding-steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(9, minmax(96px, 1fr));
+  gap: .45rem;
+  padding: .65rem;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(18,18,22,.72), rgba(9,9,11,.76));
+  overflow-x: auto;
+}
+.onboarding-steps button {
+  min-height: 116px;
+  display: grid;
+  align-content: start;
+  gap: .3rem;
+  text-align: left;
+  padding: .72rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(255,255,255,.025);
+  box-shadow: none;
+  color: #d7d3d0;
+  transition: transform .18s ease, border-color .18s ease, background-color .18s ease;
+}
+.onboarding-steps button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(248,113,113,.18);
+}
+.onboarding-steps button span {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.05);
+  color: #fecaca;
+  font-weight: 900;
+}
+.onboarding-steps button strong {
+  color: #fff;
+  font-size: .82rem;
+  line-height: 1.15;
+}
+.onboarding-steps button small {
+  color: #a8a29e;
+  font-size: .7rem;
+  line-height: 1.3;
+}
+.onboarding-steps button.active {
+  border-color: rgba(248,113,113,.34);
+  background: linear-gradient(135deg, rgba(127,29,29,.34), rgba(18,18,22,.86));
+  box-shadow: 0 12px 28px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.onboarding-steps button.active span {
+  background: rgba(127,29,29,.55);
+  border-color: rgba(248,113,113,.34);
+  color: #fff;
+}
+.onboarding-steps button.done span {
+  background: rgba(34,197,94,.14);
+  color: #bbf7d0;
+  border-color: rgba(34,197,94,.28);
+}
+.onboarding-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, .92fr);
+  gap: 1rem;
+  align-items: start;
+}
+.onboarding-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+.onboarding-required-badge {
+  flex: 0 0 auto;
+  padding: .38rem .62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(248,113,113,.18);
+  background: rgba(127,29,29,.16);
+  color: #fecaca;
+  font-size: .7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.onboarding-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .85rem;
+}
+.required-dot {
+  color: #fca5a5;
+  font-weight: 900;
+}
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  align-items: center;
+}
+.onboarding-actions button {
+  min-width: 170px;
+}
+.onboarding-save-message {
+  margin: 0;
+  padding: .75rem .85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(34,197,94,.22);
+  background: rgba(34,197,94,.08);
+  animation: authErrorIn .26s cubic-bezier(.22, 1, .36, 1);
+}
+.onboarding-checklist {
+  margin: 0;
+}
+.onboarding-checklist div {
+  justify-content: flex-start;
+  border: 1px solid rgba(255,255,255,.08);
+}
+.onboarding-checklist .pass {
+  background: rgba(34,197,94,.08);
+  border-color: rgba(34,197,94,.18);
+}
+.onboarding-checklist .fail {
+  background: rgba(127,29,29,.1);
+  border-color: rgba(248,113,113,.14);
+}
+.onboarding-runtime-card {
+  animation: pageSwitchIn .34s cubic-bezier(.22, 1, .36, 1);
+}
 .checklist { display: grid; gap: .55rem; margin: 1rem 0; }
 .checklist div { display: flex; gap: .5rem; align-items: center; padding: .55rem .65rem; border-radius: 14px; background: rgba(255,255,255,.04); }
 .pass span { color: #86efac; }
@@ -1565,9 +1762,9 @@ button.config-chip:hover {
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: .75rem; border-bottom: 1px solid rgba(255,255,255,.08); vertical-align: top; }
 th { color: #fecaca; font-size: .85rem; }
-@media (max-width: 980px) { .app-shell { grid-template-columns: 1fr; } .app-shell::before { opacity: .14; } .sidebar { position: relative; height: auto; gap: .9rem; box-shadow: 0 18px 54px rgba(0,0,0,.26); } .sidebar nav { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; overflow: visible; padding-right: 0; } .sidebar-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } .content { overflow: visible; } .topbar { align-items: flex-start; } .auth-shell { grid-template-columns: 1fr; align-content: start; } .auth-copy-panel { order: 1; } .auth-visual-panel { min-height: 540px; order: 2; } .auth-card { width: min(560px, 100%); } .cards, .two, .split, .time-range, .mini-chat-meta, .two-field-row, .channel-status-grid, .config-page-two, .config-form-grid, .faq-card-grid, .intent-card-grid, .knowledge-cards-grid, .knowledge-summary-grid, .knowledge-review-grid, .knowledge-steps { grid-template-columns: 1fr; } .preview-row { grid-template-columns: 1fr; } .knowledge-topbar, .knowledge-modal-head, .knowledge-modal-actions { grid-template-columns: 1fr; display: grid; } }
-@media (max-width: 640px) { .auth-page { padding: 1rem; overflow: auto; } .auth-page::before { animation: none; opacity: .2; } .auth-page::after { width: 92vw; height: 92vw; right: -38%; top: 18%; animation: none; opacity: .58; } .auth-shell { min-height: auto; gap: 1.25rem; } .auth-topline, .auth-tech-line { display: grid; justify-content: start; gap: .45rem; } .auth-headline { font-size: clamp(3.35rem, 17vw, 5.7rem); } .auth-card-head { grid-template-columns: 1fr; } .auth-visual-panel { min-height: 460px; padding: .2rem; } .auth-hero-label { top: 1rem; left: .3rem; } .mock-topbar { display: grid; } .mock-card-stack { grid-template-columns: 1fr; } .auth-core-object { width: min(360px, 86vw); } .auth-core-ring, .mock-status-dot, .mock-message-row::after, .mock-channel-line::after, .mock-progress-line::after { animation: none; } .auth-dashboard-float { width: min(330px, 84vw); right: 0; bottom: 0; } .auth-orbit-one { left: -18%; } .auth-orbit-two { right: -45%; } .auth-dashboard-mock, .auth-core-object { animation-duration: 18s; } .sidebar { padding: .85rem; } .brand-lockup { padding: .65rem; } .sidebar nav, .sidebar-actions { grid-template-columns: 1fr; } .topbar { display: grid; padding: .85rem; } .topbar-meta { justify-content: stretch; } .workspace-pill, .user-pill { width: 100%; } .content { padding: .85rem; } .card:hover, .sidebar nav button:hover { transform: none; } }
-@media (prefers-reduced-motion: reduce) { .auth-page::before, .auth-page::after, .auth-card, .auth-card-head, .auth-subtitle, .auth-headline span, .auth-topline, .auth-mode-switch, .auth-mode-switch::before, .auth-form, .auth-signup-fields, .auth-error, .auth-visual-panel, .auth-tech-line, .auth-hero-placeholder, .auth-hero-label, .auth-ambient, .auth-orbit, .auth-core-object, .auth-core-ring, .auth-core-panel, .auth-dashboard-float, .auth-dashboard-mock, .mock-card, .mock-status-dot, .mock-message-row::after, .mock-channel-line::after, .mock-progress-line::after, .auth-submit, .auth-mode-switch button, .auth-form input, .sidebar, .page-transition, .handoff-toast, .nav-alert-dot, .card, .sidebar nav button { animation: none; transition: none; } }
+@media (max-width: 980px) { .app-shell { grid-template-columns: 1fr; } .app-shell::before { opacity: .14; } .sidebar { position: relative; height: auto; gap: .9rem; box-shadow: 0 18px 54px rgba(0,0,0,.26); } .sidebar nav { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; overflow: visible; padding-right: 0; } .sidebar-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } .content { overflow: visible; } .topbar { align-items: flex-start; } .auth-shell { grid-template-columns: 1fr; align-content: start; } .auth-copy-panel { order: 1; } .auth-visual-panel { min-height: 540px; order: 2; } .auth-card { width: min(560px, 100%); } .onboarding-hero, .onboarding-layout { grid-template-columns: 1fr; } .onboarding-steps { grid-template-columns: repeat(9, minmax(104px, 1fr)); } .cards, .two, .split, .time-range, .mini-chat-meta, .two-field-row, .channel-status-grid, .config-page-two, .config-form-grid, .faq-card-grid, .intent-card-grid, .knowledge-cards-grid, .knowledge-summary-grid, .knowledge-review-grid, .knowledge-steps { grid-template-columns: 1fr; } .preview-row { grid-template-columns: 1fr; } .knowledge-topbar, .knowledge-modal-head, .knowledge-modal-actions { grid-template-columns: 1fr; display: grid; } }
+@media (max-width: 640px) { .auth-page { padding: 1rem; overflow: auto; } .auth-page::before { animation: none; opacity: .2; } .auth-page::after { width: 92vw; height: 92vw; right: -38%; top: 18%; animation: none; opacity: .58; } .auth-shell { min-height: auto; gap: 1.25rem; } .auth-topline, .auth-tech-line { display: grid; justify-content: start; gap: .45rem; } .auth-headline { font-size: clamp(3.35rem, 17vw, 5.7rem); } .auth-card-head { grid-template-columns: 1fr; } .auth-visual-panel { min-height: 460px; padding: .2rem; } .auth-hero-label { top: 1rem; left: .3rem; } .mock-topbar { display: grid; } .mock-card-stack { grid-template-columns: 1fr; } .auth-core-object { width: min(360px, 86vw); } .auth-core-ring, .mock-status-dot, .mock-message-row::after, .mock-channel-line::after, .mock-progress-line::after { animation: none; } .auth-dashboard-float { width: min(330px, 84vw); right: 0; bottom: 0; } .auth-orbit-one { left: -18%; } .auth-orbit-two { right: -45%; } .auth-dashboard-mock, .auth-core-object { animation-duration: 18s; } .sidebar { padding: .85rem; } .brand-lockup { padding: .65rem; } .sidebar nav, .sidebar-actions { grid-template-columns: 1fr; } .topbar { display: grid; padding: .85rem; } .topbar-meta { justify-content: stretch; } .workspace-pill, .user-pill { width: 100%; } .content { padding: .85rem; } .onboarding-steps, .onboarding-form-grid { grid-template-columns: 1fr; } .onboarding-steps button { min-height: auto; } .onboarding-card-head, .onboarding-actions { display: grid; } .onboarding-actions button { width: 100%; } .card:hover, .sidebar nav button:hover, .onboarding-steps button:hover { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .auth-page::before, .auth-page::after, .auth-card, .auth-card-head, .auth-subtitle, .auth-headline span, .auth-topline, .auth-mode-switch, .auth-mode-switch::before, .auth-form, .auth-signup-fields, .auth-error, .auth-visual-panel, .auth-tech-line, .auth-hero-placeholder, .auth-hero-label, .auth-ambient, .auth-orbit, .auth-core-object, .auth-core-ring, .auth-core-panel, .auth-dashboard-float, .auth-dashboard-mock, .mock-card, .mock-status-dot, .mock-message-row::after, .mock-channel-line::after, .mock-progress-line::after, .auth-submit, .auth-mode-switch button, .auth-form input, .sidebar, .page-transition, .handoff-toast, .nav-alert-dot, .card, .sidebar nav button, .onboarding-runtime-card, .onboarding-progress-track i, .onboarding-steps button, .onboarding-save-message { animation: none; transition: none; } }
 
 /* batch 5 uat + operations polish */
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }

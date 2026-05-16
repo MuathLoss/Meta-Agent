@@ -463,6 +463,22 @@ function OnboardingWizard({ token, tenantSlug, readiness, reload }: { token: str
   const [message, setMessage] = useState('كم السعر وهل فيه تسجيل؟');
   const [analysis, setAnalysis] = useState<RuntimeClassification | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const readinessItems = readiness?.items || [];
+  const completedCount = readinessItems.filter((item) => item.passed).length;
+  const totalCount = readinessItems.length;
+  const completionPercent = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
+  const setupSteps = [
+    { number: 1, title: 'Business account', detail: 'Profile and workspace identity.' },
+    { number: 2, title: 'Branches & hours', detail: 'Locations and availability.' },
+    { number: 3, title: 'Staff & roles', detail: 'Team access and ownership.' },
+    { number: 4, title: 'FAQ knowledge base', detail: 'Reusable business answers.' },
+    { number: 5, title: 'Intents & routing', detail: 'Classification and handoff.' },
+    { number: 6, title: 'Sample messages', detail: 'Test common customer asks.' },
+    { number: 7, title: 'Channel setup', detail: 'Connect customer channels.' },
+    { number: 8, title: 'Review readiness', detail: 'Resolve launch blockers.' },
+    { number: 9, title: 'Publish workspace', detail: 'Launch the private agent.' },
+  ];
+  const currentStepTitle = setupSteps.find((item) => item.number === step)?.title || 'Workspace details';
   async function saveStep(e: FormEvent) {
     e.preventDefault();
     const data = {
@@ -478,25 +494,85 @@ function OnboardingWizard({ token, tenantSlug, readiness, reload }: { token: str
     const result = await api.runtimeClassify(token, tenantSlug, message);
     setAnalysis(result);
   }
-  return <section className="grid two">
-    <form className="card form-stack" onSubmit={saveStep}>
-      <p className="eyebrow">Self-serve onboarding</p>
-      <h3>Wizard draft save</h3>
-      <label>Step number<input type="number" min={1} max={9} value={step} onChange={(e) => setStep(Number(e.target.value))} /></label>
-      <label>Display name<input placeholder="Sarh Al-Ma'rifah Institute" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></label>
-      <label>Timezone<input placeholder="Asia/Riyadh" value={timezone} onChange={(e) => setTimezone(e.target.value)} /></label>
-      <label>Default language<input placeholder="ar" value={defaultLang} onChange={(e) => setDefaultLang(e.target.value)} /></label>
-      <button>Save step draft</button>
-      {saved && <p className="success-text">{saved}</p>}
-      <div className="checklist">{readiness?.items.map((i) => <div key={i.key} className={i.passed ? 'pass' : 'fail'}><span>{i.passed ? '✓' : '•'}</span>{i.label}</div>)}</div>
-    </form>
-    <div className="card form-stack">
-      <p className="eyebrow">Runtime engine proof</p>
-      <h3>Classify without creating a message</h3>
-      <label>Customer message<input value={message} onChange={(e) => setMessage(e.target.value)} /><small className="field-hint">inbox for testing</small></label>
-      <button onClick={classify}>Classify message</button>
-      {analysis && <RuntimeChatPreview message={message} analysis={analysis} />}
+  return <section className="onboarding-shell">
+    <header className="onboarding-hero card">
+      <div>
+        <p className="eyebrow">Self-serve onboarding</p>
+        <h3>Configure a private agent workspace</h3>
+        <p className="muted">Save each setup draft, confirm readiness, then publish when the workspace is prepared for real customer conversations.</p>
+      </div>
+      <div className="onboarding-progress-card" aria-label={`${completionPercent}% onboarding readiness`}>
+        <span>Readiness</span>
+        <strong>{completionPercent}%</strong>
+        <div className="onboarding-progress-track"><i style={{ width: `${completionPercent}%` }} /></div>
+        <small>{completedCount} of {totalCount || 0} checks complete</small>
+      </div>
+    </header>
+
+    <div className="onboarding-steps" aria-label="Onboarding steps">
+      {setupSteps.map((item) => {
+        const isCurrent = step === item.number;
+        const isDone = item.number < step || (item.number === 4 && totalCount > 0 && completedCount === totalCount);
+        return <button type="button" key={item.number} className={isCurrent ? 'active' : isDone ? 'done' : ''} onClick={() => setStep(item.number)}>
+          <span>{isDone ? '✓' : item.number}</span>
+          <strong>{item.title}</strong>
+          <small>{item.detail}</small>
+        </button>;
+      })}
     </div>
+
+    <section className="onboarding-layout">
+      <form className="card form-stack onboarding-form-card" onSubmit={saveStep}>
+        <div className="onboarding-card-head">
+          <div>
+            <p className="eyebrow">Draft setup</p>
+            <h3>Step {step}: {currentStepTitle}</h3>
+          </div>
+          <span className="onboarding-required-badge">Required fields</span>
+        </div>
+        <div className="onboarding-form-grid">
+          <label>Step number <span className="required-dot">*</span><input type="number" min={1} max={9} value={step} onChange={(e) => setStep(Number(e.target.value))} /></label>
+          <label>Display name <span className="required-dot">*</span><input placeholder="Your business name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></label>
+          <label>Timezone <span className="required-dot">*</span><input placeholder="Asia/Riyadh" value={timezone} onChange={(e) => setTimezone(e.target.value)} /></label>
+          <label>Default language <span className="required-dot">*</span><input placeholder="ar" value={defaultLang} onChange={(e) => setDefaultLang(e.target.value)} /></label>
+        </div>
+        <div className="onboarding-actions">
+          <button>Save step draft</button>
+          <span className="field-hint">Draft saves preserve the current step data for this tenant workspace.</span>
+        </div>
+        {saved && <p className="success-text onboarding-save-message">{saved}</p>}
+      </form>
+
+      <aside className="card onboarding-review-card">
+        <div className="onboarding-card-head">
+          <div>
+            <p className="eyebrow">Review readiness</p>
+            <h3>Launch checklist</h3>
+          </div>
+          <span className={totalCount > 0 && completedCount === totalCount ? 'pass-pill' : 'fail-pill'}>{totalCount > 0 && completedCount === totalCount ? 'Ready' : 'Incomplete'}</span>
+        </div>
+        <div className="checklist onboarding-checklist">
+          {readinessItems.length === 0 && <div className="fail"><span>•</span>No readiness checks loaded yet.</div>}
+          {readinessItems.map((i) => <div key={i.key} className={i.passed ? 'pass' : 'fail'}><span>{i.passed ? '✓' : '•'}</span><strong>{i.label}</strong></div>)}
+        </div>
+      </aside>
+    </section>
+
+    <section className="card form-stack onboarding-runtime-card">
+      <div className="onboarding-card-head">
+        <div>
+          <p className="eyebrow">Runtime engine proof</p>
+          <h3>Classify without creating a message</h3>
+        </div>
+        <span className="onboarding-required-badge">Test mode</span>
+      </div>
+      <label>Customer message<input value={message} onChange={(e) => setMessage(e.target.value)} /><small className="field-hint">Use a sample customer message to preview intent and routing behavior.</small></label>
+      <div className="onboarding-actions">
+        <button onClick={classify}>Classify message</button>
+        <span className="field-hint">This does not create an inbox conversation.</span>
+      </div>
+      {analysis && <RuntimeChatPreview message={message} analysis={analysis} />}
+    </section>
   </section>;
 }
 

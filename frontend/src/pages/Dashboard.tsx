@@ -1200,19 +1200,33 @@ function Staff({ rows, token, tenantSlug, reload }: { rows: StaffUser[]; token: 
   const [pendingDelete, setPendingDelete] = useState<StaffUser | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [creatingStaff, setCreatingStaff] = useState(false);
+  const [staffStatus, setStaffStatus] = useState<string | null>(null);
+
+  const activeStaffCount = rows.filter((row) => row.is_active).length;
+  const inactiveStaffCount = rows.length - activeStaffCount;
+  const uniqueRoleCount = new Set(rows.flatMap((row) => row.roles)).size;
+  const selectedRoleLabel = roles.split('_').join(' ').toLowerCase();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
+    setStaffStatus(null);
     if (password.length < 8) {
       setFormError('Password must be at least 8 characters.');
       return;
     }
-    await api.createStaff(token, tenantSlug, { email, full_name: name, password, roles: [roles] });
-    setEmail('');
-    setName('');
-    setPassword('');
-    await reload();
+    setCreatingStaff(true);
+    try {
+      await api.createStaff(token, tenantSlug, { email, full_name: name, password, roles: [roles] });
+      setEmail('');
+      setName('');
+      setPassword('');
+      await reload();
+      setStaffStatus('Staff user created.');
+    } finally {
+      setCreatingStaff(false);
+    }
   }
 
   async function confirmDelete() {
@@ -1227,7 +1241,92 @@ function Staff({ rows, token, tenantSlug, reload }: { rows: StaffUser[]; token: 
     }
   }
 
-  return <section className="grid two staff-layout"><form className="card form-stack staff-form-card" onSubmit={submit}><p className="eyebrow">Users and roles</p><h3>Add staff user</h3><label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>Name<input value={name} onChange={(e) => setName(e.target.value)} /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label>Roles<select value={roles} onChange={(e) => setRoles(e.target.value)}>{staffRoleOptions.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>{boxError(formError)}<button>Add staff</button></form><div className="card staff-list-card"><h3>Staff</h3><div className="staff-grid">{rows.length === 0 && <p className="muted">No staff yet.</p>}{rows.map((row) => <div className="staff-card" key={row.id}><button className="close-chip staff-close-chip" type="button" aria-label={`Delete ${row.full_name}`} onClick={() => setPendingDelete(row)}>x</button><div className="staff-head"><div className={`status-dot ${row.is_active ? 'on' : 'off'}`} aria-hidden="true" /><div><strong>{row.full_name}</strong><p>{row.email}</p></div></div><div className="staff-meta"><div><small>ID</small><span>#{row.id}</span></div><div><small>Status</small><span>{row.is_active ? 'active' : 'inactive'}</span></div></div><div className="staff-roles">{row.roles.length > 0 ? row.roles.map((role) => <span className="staff-role-pill" key={role}>{role}</span>) : <span className="muted">No roles</span>}</div></div>)}</div></div>{pendingDelete && <div className="confirm-overlay" role="dialog" aria-modal="true"><div className="confirm-card"><h3>Are you sure you want to delete this role?</h3><p className="muted">{pendingDelete.full_name} · {pendingDelete.email}</p><div className="button-row"><button onClick={() => void confirmDelete()} disabled={deletingId === pendingDelete.id}>{deletingId === pendingDelete.id ? 'Deleting...' : 'Accept'}</button><button className="secondary" onClick={() => setPendingDelete(null)} disabled={deletingId === pendingDelete.id}>Cancel</button></div></div></div>}</section>;
+  return <section className="staff-shell">
+    <div className="staff-hero">
+      <div>
+        <p className="eyebrow">Users and roles</p>
+        <h2>Team access management</h2>
+        <p className="muted">Create staff accounts, assign operational roles, and keep tenant access clear for the business workspace.</p>
+      </div>
+      <div className="staff-summary-grid" aria-label="Staff summary">
+        <div><span>Total users</span><strong>{rows.length}</strong></div>
+        <div><span>Active</span><strong>{activeStaffCount}</strong></div>
+        <div><span>Inactive</span><strong>{inactiveStaffCount}</strong></div>
+        <div><span>Roles</span><strong>{uniqueRoleCount}</strong></div>
+      </div>
+    </div>
+
+    <div className="grid two staff-layout">
+      <form className="card form-stack staff-form-card" onSubmit={submit}>
+        <div className="staff-card-head">
+          <div>
+            <p className="eyebrow">Create access</p>
+            <h3>Add staff user</h3>
+            <p className="muted">Provision one team member at a time with the minimum role needed for their work.</p>
+          </div>
+        </div>
+        <div className="staff-form-grid">
+          <label>Email
+            <span className="field-helper">Use the staff member&apos;s work email for login.</span>
+            <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+          </label>
+          <label>Name
+            <span className="field-helper">Shown in internal staff and audit views.</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+          </label>
+          <label>Password
+            <span className="field-helper">Minimum 8 characters. Do not reuse shared credentials.</span>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label>Role
+            <span className="field-helper">Selected role: {selectedRoleLabel}.</span>
+            <select value={roles} onChange={(e) => setRoles(e.target.value)}>{staffRoleOptions.map((role) => <option key={role} value={role}>{role.split('_').join(' ')}</option>)}</select>
+          </label>
+        </div>
+        <div className="staff-role-note">
+          <strong>Role scope</strong>
+          <p>Roles control what staff can operate inside this tenant workspace. Keep access specific and review inactive users regularly.</p>
+        </div>
+        {boxError(formError)}
+        {staffStatus && <p className="settings-status success">{staffStatus}</p>}
+        <div className="staff-form-actions">
+          <button disabled={creatingStaff}>{creatingStaff ? 'Creating...' : 'Add staff'}</button>
+        </div>
+      </form>
+
+      <div className="card staff-list-card">
+        <div className="staff-card-head">
+          <div>
+            <p className="eyebrow">Directory</p>
+            <h3>Staff users</h3>
+            <p className="muted">Monitor account status and role assignments for this tenant.</p>
+          </div>
+        </div>
+        <div className="staff-grid">
+          {rows.length === 0 && <div className="staff-empty-state"><strong>No staff users yet</strong><p>Add the first staff user to begin assigning operational access.</p></div>}
+          {rows.map((row) => <div className="staff-card" key={row.id}>
+            <button className="close-chip staff-close-chip" type="button" aria-label={`Delete ${row.full_name}`} onClick={() => setPendingDelete(row)}>x</button>
+            <div className="staff-head">
+              <div className={`staff-avatar ${row.is_active ? 'active' : 'inactive'}`} aria-hidden="true">{initialsFromName(row.full_name || row.email)}</div>
+              <div>
+                <strong>{row.full_name}</strong>
+                <p>{row.email}</p>
+              </div>
+            </div>
+            <div className="staff-meta">
+              <div><small>User ID</small><span>#{row.id}</span></div>
+              <div><small>Status</small><span className={row.is_active ? 'staff-status-pill active' : 'staff-status-pill inactive'}>{row.is_active ? 'Active' : 'Inactive'}</span></div>
+            </div>
+            <div className="staff-roles" aria-label={`${row.full_name} roles`}>
+              {row.roles.length > 0 ? row.roles.map((role) => <span className="staff-role-pill" key={role}>{role.split('_').join(' ')}</span>) : <span className="staff-role-pill empty">No roles</span>}
+            </div>
+          </div>)}
+        </div>
+      </div>
+    </div>
+
+    {pendingDelete && <div className="confirm-overlay" role="dialog" aria-modal="true"><div className="confirm-card"><h3>Are you sure you want to delete this staff user?</h3><p className="muted">{pendingDelete.full_name} · {pendingDelete.email}</p><div className="button-row"><button onClick={() => void confirmDelete()} disabled={deletingId === pendingDelete.id}>{deletingId === pendingDelete.id ? 'Deleting...' : 'Accept'}</button><button className="secondary" onClick={() => setPendingDelete(null)} disabled={deletingId === pendingDelete.id}>Cancel</button></div></div></div>}
+  </section>;
 }
 
 function normalizeIntentCode(value: string) {

@@ -800,6 +800,49 @@ function Inbox({ rows, selectedConversationId, conversation, openConversation, h
   </section>;
 }
 
+const SECRET_LIKE_KEY = /(secret|token|password|credential|authorization|api[_-]?key|app[_-]?secret|verify[_-]?token|provider[_-]?id|phone[_-]?number[_-]?id|waba|bot[_-]?token|signature|x[_-]?hub)/i;
+
+function sanitizeDiagnosticValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => sanitizeDiagnosticValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      SECRET_LIKE_KEY.test(key) ? '[hidden]' : sanitizeDiagnosticValue(item),
+    ]));
+  }
+  return value;
+}
+
+function formatDiagnosticValue(value: unknown) {
+  const safeValue = sanitizeDiagnosticValue(value);
+  if (safeValue === null || safeValue === undefined || safeValue === '') return 'not set';
+  if (typeof safeValue === 'boolean') return safeValue ? 'yes' : 'no';
+  if (typeof safeValue === 'number') return String(safeValue);
+  if (typeof safeValue === 'string') return safeValue;
+  return JSON.stringify(safeValue);
+}
+
+function DiagnosticOutput({ title, description, data }: { title: string; description: string; data: Record<string, unknown> }) {
+  const safeData = sanitizeDiagnosticValue(data) as Record<string, unknown>;
+  const summaryEntries = Object.entries(safeData).slice(0, 4);
+  return <details className="diagnostic-panel" open>
+    <summary>
+      <span>
+        <strong>{title}</strong>
+        <small>{description}</small>
+      </span>
+      <span className="diagnostic-toggle">Details</span>
+    </summary>
+    {summaryEntries.length > 0 && <div className="diagnostic-kv-grid">
+      {summaryEntries.map(([key, value]) => <div key={key}>
+        <small>{prettifyKeyLabel(key)}</small>
+        <strong>{formatDiagnosticValue(value)}</strong>
+      </div>)}
+    </div>}
+    <pre className="system-pre diagnostic-pre">{JSON.stringify(safeData, null, 2)}</pre>
+  </details>;
+}
+
 function UatPanel({ token, tenantSlug }: { token: string; tenantSlug: string }) {
   const [run, setRun] = useState<UatRun | null>(null);
   const [customMessage, setCustomMessage] = useState('هل المعهد معتمد؟');
@@ -850,7 +893,7 @@ function UatPanel({ token, tenantSlug }: { token: string; tenantSlug: string }) 
       <label>Message<input value={customMessage} onChange={(e) => setCustomMessage(e.target.value)} /></label>
       <label>Expected intent<input value={customExpectedIntent} onChange={(e) => setCustomExpectedIntent(e.target.value)} /></label>
       <button>Run custom test</button>
-      {customResult && <pre className="system-pre">{JSON.stringify(customResult, null, 2)}</pre>}
+      {customResult && <DiagnosticOutput title="Classification result" description="Safe structured response from the custom tenant UAT check." data={customResult} />}
     </form>
   </section>;
 }
@@ -912,14 +955,14 @@ function DeploymentPanel({ token, tenantSlug }: { token: string; tenantSlug: str
       <p className="eyebrow">WhatsApp go-live package</p>
       <h3>Still required before academy live hookup</h3>
       <p className="muted">Provider-facing requirements and readiness notes.</p>
-      {goLive ? <pre className="system-pre">{JSON.stringify(goLive, null, 2)}</pre> : <div className="system-empty-state compact"><strong>No package loaded</strong><p>Refresh deployment status to load the go-live package.</p></div>}
+      {goLive ? <DiagnosticOutput title="Go-live package" description="Provider-facing readiness fields with credential-like values hidden." data={goLive} /> : <div className="system-empty-state compact"><strong>No package loaded</strong><p>Refresh deployment status to load the go-live package.</p></div>}
     </div>
     <div className="card system-panel">
       <p className="eyebrow">Webhook UAT fixtures</p>
       <h3>Signed payload samples</h3>
       <p className="muted">These normalize and classify realistic WhatsApp payloads without creating customer messages.</p>
       <div className="list system-list">{fixtures.slice(0, 5).map((f) => <div className="list-card system-list-card" key={f.id}><b>{f.id}</b><p>{f.message}</p><small>{f.x_hub_signature_256 ? 'signed fixture available' : 'signature unavailable until app secret is configured'}</small><button onClick={() => void simulate(f.id)}>Simulate</button></div>)}</div>
-      {simulation && <pre className="system-pre">{JSON.stringify(simulation, null, 2)}</pre>}
+      {simulation && <DiagnosticOutput title="Simulation result" description="Safe structured result from the selected webhook fixture." data={simulation} />}
     </div>
   </section>;
 }
@@ -3360,7 +3403,7 @@ function Broadcasts({ rows, token, tenantSlug, reload }: { rows: Broadcast[]; to
 }
 
 function SimpleRows<T extends object>({ rows }: { rows: T[] }) {
-  return <div className="list">{rows.length === 0 && <p className="muted">No rows yet.</p>}{rows.map((r, idx) => <pre key={idx}>{JSON.stringify(r, null, 2)}</pre>)}</div>;
+  return <div className="list">{rows.length === 0 && <p className="muted">No rows yet.</p>}{rows.map((r, idx) => <DiagnosticOutput key={idx} title={`Row ${idx + 1}`} description="Safe row details with credential-like values hidden." data={r as Record<string, unknown>} />)}</div>;
 }
 
 function SimpleTable<T extends object>({ title, rows }: { title: string; rows: T[] }) {
@@ -3374,6 +3417,6 @@ function SimpleTable<T extends object>({ title, rows }: { title: string; rows: T
       </div>
       <span className="audit-count-pill">{rows.length} rows</span>
     </div>
-    {rows.length === 0 ? <div className="system-empty-state"><strong>No audit entries yet</strong><p>Activity will appear here after tenant actions are recorded.</p></div> : <div className="table-wrap audit-table-wrap"><table><thead><tr>{keys.map((k) => <th key={k}>{prettifyKeyLabel(k)}</th>)}</tr></thead><tbody>{rows.map((r, i) => { const obj = r as Record<string, unknown>; return <tr key={i}>{keys.map((k) => <td key={k}>{typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : String(obj[k] ?? '')}</td>)}</tr>; })}</tbody></table></div>}
+    {rows.length === 0 ? <div className="system-empty-state"><strong>No audit entries yet</strong><p>Activity will appear here after tenant actions are recorded.</p></div> : <div className="table-wrap audit-table-wrap"><table><thead><tr>{keys.map((k) => <th key={k}>{prettifyKeyLabel(k)}</th>)}</tr></thead><tbody>{rows.map((r, i) => { const obj = r as Record<string, unknown>; return <tr key={i}>{keys.map((k) => <td key={k}>{typeof obj[k] === 'object' ? <code className="audit-cell-code">{formatDiagnosticValue(obj[k])}</code> : formatDiagnosticValue(obj[k])}</td>)}</tr>; })}</tbody></table></div>}
   </section>;
 }

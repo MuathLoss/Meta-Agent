@@ -3878,6 +3878,104 @@ th { color: #fecaca; font-size: .85rem; }
   border: 1px solid rgba(255,255,255,.08);
   background: rgba(3,7,18,.55);
 }
+.diagnostic-panel {
+  display: grid;
+  gap: .85rem;
+  padding: .9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.09);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02)),
+    rgba(3,7,18,.38);
+}
+.diagnostic-panel summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .9rem;
+  cursor: pointer;
+  list-style: none;
+}
+.diagnostic-panel summary::-webkit-details-marker {
+  display: none;
+}
+.diagnostic-panel summary > span:first-child {
+  display: grid;
+  gap: .18rem;
+  min-width: 0;
+}
+.diagnostic-panel summary strong {
+  color: #fff7ed;
+  font-size: .95rem;
+}
+.diagnostic-panel summary small {
+  color: #a8a29e;
+  line-height: 1.4;
+}
+.diagnostic-toggle {
+  flex: 0 0 auto;
+  min-height: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  padding: .25rem .58rem;
+  border-radius: 999px;
+  border: 1px solid rgba(248,113,113,.2);
+  background: rgba(127,29,29,.12);
+  color: #fecaca;
+  font-size: .68rem;
+  font-weight: 900;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.diagnostic-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .55rem;
+}
+.diagnostic-kv-grid div {
+  min-width: 0;
+  padding: .65rem .7rem;
+  border-radius: 13px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(15,23,42,.45);
+}
+.diagnostic-kv-grid small {
+  display: block;
+  margin-bottom: .16rem;
+  color: #a8a29e;
+  font-size: .67rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.diagnostic-kv-grid strong {
+  display: block;
+  color: #fff7ed;
+  font-size: .84rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.diagnostic-pre {
+  margin: 0;
+  max-height: 320px;
+  border-radius: 13px;
+  color: #d9f99d;
+  font-size: .78rem;
+  line-height: 1.45;
+}
+.audit-cell-code {
+  display: inline-block;
+  max-width: 420px;
+  padding: .28rem .42rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(3,7,18,.45);
+  color: #d9f99d;
+  font-size: .78rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .audit-panel {
   display: grid;
   gap: 1rem;
@@ -3997,7 +4095,9 @@ th { color: #fecaca; font-size: .85rem; }
     overflow-wrap: anywhere;
   }
   pre,
-  .system-pre {
+  .system-pre,
+  .diagnostic-pre,
+  .audit-cell-code {
     max-width: 100%;
     overflow: auto;
   }
@@ -4049,6 +4149,19 @@ th { color: #fecaca; font-size: .85rem; }
   }
   .knowledge-modal-body {
     max-height: none;
+  }
+  .diagnostic-panel {
+    padding: .75rem;
+  }
+  .diagnostic-panel summary,
+  .diagnostic-kv-grid {
+    grid-template-columns: 1fr;
+  }
+  .diagnostic-panel summary {
+    display: grid;
+  }
+  .diagnostic-toggle {
+    width: fit-content;
   }
   .knowledge-filter-tabs,
   .ticket-filter-tabs {

@@ -17,3 +17,9 @@ cmd.txt
 
 # Local uploaded tenant files
 backend/uploads/
+
+# Local dev runner artifacts
+.dev-runner/
+
+# Local uploaded tenant files
+backend/uploads/

@@ -11,3 +11,9 @@ build/
 .coverage
 htmlcov/
 cmd.txt
+
+# Local dev runner artifacts
+.dev-runner/
+
+# Local uploaded tenant files
+backend/uploads/

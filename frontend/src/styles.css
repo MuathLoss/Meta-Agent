@@ -2412,6 +2412,123 @@ pre { overflow: auto; white-space: pre-wrap; border-radius: 16px; padding: 1rem;
 .confirm-card h3 {
   margin: 0 0 .55rem;
 }
+.intents-shell {
+  display: grid;
+  gap: 1rem;
+}
+.intents-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: end;
+  padding: 1.25rem;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(127,29,29,.16), rgba(16,16,20,.92) 44%, rgba(7,7,9,.95));
+  box-shadow: 0 18px 48px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.045);
+}
+.intents-hero h2 {
+  margin: .15rem 0 .4rem;
+  color: #fff;
+  font-size: clamp(1.35rem, 2.2vw, 2rem);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+.intents-hero .muted {
+  max-width: 790px;
+  margin: 0;
+}
+.intents-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(82px, 1fr));
+  gap: .65rem;
+  min-width: min(560px, 100%);
+}
+.intents-summary-grid div {
+  display: grid;
+  gap: .15rem;
+  padding: .78rem .82rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.09);
+  background: rgba(3,7,18,.46);
+}
+.intents-summary-grid span {
+  color: #a8a29e;
+  font-size: .66rem;
+  font-weight: 900;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.intents-summary-grid strong {
+  color: #fff;
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.intents-workspace .config-editor-card,
+.intents-workspace .config-library-card {
+  background:
+    linear-gradient(180deg, rgba(19,19,23,.9), rgba(10,10,13,.94));
+}
+.intent-route-badge,
+.intent-priority-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  width: fit-content;
+  padding: .24rem .65rem;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.intent-route-badge.bot {
+  border: 1px solid rgba(34,197,94,.24);
+  background: rgba(34,197,94,.11);
+  color: #bbf7d0;
+}
+.intent-route-badge.offer {
+  border: 1px solid rgba(251,191,36,.28);
+  background: rgba(251,191,36,.1);
+  color: #fde68a;
+}
+.intent-route-badge.handoff {
+  border: 1px solid rgba(248,113,113,.28);
+  background: rgba(127,29,29,.2);
+  color: #fecaca;
+}
+.intent-priority-badge.normal {
+  border: 1px solid rgba(148,163,184,.18);
+  background: rgba(148,163,184,.1);
+  color: #cbd5e1;
+}
+.intent-priority-badge.high {
+  border: 1px solid rgba(251,191,36,.3);
+  background: rgba(251,191,36,.12);
+  color: #fde68a;
+}
+.intent-priority-badge.urgent {
+  border: 1px solid rgba(248,113,113,.35);
+  background: rgba(127,29,29,.24);
+  color: #fecaca;
+}
+.intent-empty-state {
+  display: grid;
+  gap: .22rem;
+  padding: 1.15rem;
+  border-radius: 16px;
+  border: 1px dashed rgba(248,113,113,.24);
+  background: rgba(127,29,29,.07);
+}
+.intent-empty-state strong {
+  color: #fff;
+}
+.intent-empty-state p {
+  margin: 0;
+  color: #cbd5e1;
+}
 .config-page {
   display: grid;
   gap: 1rem;
@@ -2450,6 +2567,11 @@ pre { overflow: auto; white-space: pre-wrap; border-radius: 16px; padding: 1rem;
   border-radius: 20px;
   border: 1px solid rgba(255,255,255,.08);
   background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(15,23,42,.24));
+}
+.intents-workspace .config-language-card,
+.intents-workspace .config-block {
+  border-color: rgba(255,255,255,.075);
+  background: rgba(255,255,255,.026);
 }
 .config-language-head {
   display: flex;
@@ -2516,6 +2638,35 @@ pre { overflow: auto; white-space: pre-wrap; border-radius: 16px; padding: 1rem;
   max-height: 70vh;
   overflow: auto;
   padding-right: .2rem;
+}
+.intent-item-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255,255,255,.09);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.048), rgba(255,255,255,.025));
+}
+.intent-item-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: rgba(148,163,184,.45);
+}
+.intent-item-card.route-bot::before {
+  background: rgba(34,197,94,.65);
+}
+.intent-item-card.route-offer::before {
+  background: rgba(251,191,36,.72);
+}
+.intent-item-card.route-handoff::before {
+  background: rgba(248,113,113,.8);
+}
+.intent-item-card.priority-urgent {
+  border-color: rgba(248,113,113,.18);
+}
+.intent-item-card.priority-high {
+  border-color: rgba(251,191,36,.16);
 }
 .config-item-head {
   display: flex;
@@ -3545,6 +3696,8 @@ th { color: #fecaca; font-size: .85rem; }
 @media (max-width: 640px) { .staff-hero, .staff-form-grid { padding: .85rem; } .staff-summary-grid, .staff-meta { grid-template-columns: 1fr; } .staff-form-actions { display: grid; } .staff-form-actions button { width: 100%; } .staff-head { align-items: flex-start; } .staff-role-pill, .staff-status-pill { white-space: normal; overflow-wrap: anywhere; } }
 @media (max-width: 980px) { .channels-hero { grid-template-columns: 1fr; align-items: start; } .channels-summary-grid { grid-template-columns: 1fr; min-width: 0; } .channel-card-head { display: grid; } }
 @media (max-width: 640px) { .channels-hero, .channel-form-grid, .channel-secret-grid { padding: .85rem; } .channel-form-actions { display: grid; } .channel-form-actions button { width: 100%; } .channel-status-head { align-items: flex-start; } .channel-state-badge { white-space: normal; overflow-wrap: anywhere; } }
+@media (max-width: 980px) { .intents-hero { grid-template-columns: 1fr; align-items: start; } .intents-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; } }
+@media (max-width: 640px) { .intents-hero { padding: .85rem; } .intents-summary-grid { grid-template-columns: 1fr; } .intent-route-badge, .intent-priority-badge { white-space: normal; overflow-wrap: anywhere; } .intent-item-card .button-row button { width: 100%; } }
 @media (max-width: 980px) { .app-shell { grid-template-columns: 1fr; } .app-shell::before { opacity: .14; } .sidebar { position: relative; height: auto; gap: .9rem; box-shadow: 0 18px 54px rgba(0,0,0,.26); } .sidebar nav { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; overflow: visible; padding-right: 0; } .sidebar-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } .content { overflow: visible; } .topbar { align-items: flex-start; } .auth-shell { grid-template-columns: 1fr; align-content: start; } .auth-copy-panel { order: 1; } .auth-visual-panel { min-height: 540px; order: 2; } .auth-card { width: min(560px, 100%); } .onboarding-hero, .onboarding-layout { grid-template-columns: 1fr; } .onboarding-steps { grid-template-columns: repeat(9, minmax(104px, 1fr)); } .cards, .two, .split, .time-range, .mini-chat-meta, .two-field-row, .channel-status-grid, .config-page-two, .config-form-grid, .faq-card-grid, .intent-card-grid, .knowledge-cards-grid, .knowledge-summary-grid, .knowledge-review-grid, .knowledge-steps { grid-template-columns: 1fr; } .preview-row { grid-template-columns: 1fr; } .knowledge-topbar, .knowledge-modal-head, .knowledge-modal-actions { grid-template-columns: 1fr; display: grid; } }
 @media (max-width: 980px) { .knowledge-controls, .knowledge-answer-grid { grid-template-columns: 1fr; } .knowledge-head-actions { justify-items: stretch; min-width: 0; } .knowledge-filter-tabs { justify-content: flex-start; } }
 @media (max-width: 980px) { .inbox-panel { height: auto; min-height: 0; } .inbox-list { max-height: 46vh; } .conversation-scroll { min-height: 420px; } }

@@ -2341,6 +2341,10 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
   const faqTopics = useMemo(() => faq.map((row) => row.topic_key).sort(), [faq]);
   const sortedIntents = useMemo(() => [...intents].sort((a, b) => a.code.localeCompare(b.code)), [intents]);
   const routingByIntent = useMemo(() => new Map(routing.map((row) => [row.intent_code, row])), [routing]);
+  const enabledIntentCount = intents.filter((intent) => intent.enabled).length;
+  const handoffRouteCount = routing.filter((route) => route.handoff_required || route.response_behavior === 'immediate_handoff' || route.response_behavior === 'offer_handoff').length;
+  const highPriorityRouteCount = routing.filter((route) => route.priority === 'high' || route.priority === 'urgent').length;
+  const keywordCount = intents.reduce((count, intent) => count + intent.keywords.length, 0);
 
   function applyRoutePreset(intentCode: string) {
     const normalized = normalizeIntentCode(intentCode);
@@ -2536,12 +2540,29 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
     }
   }
 
-  return <section className="config-page config-page-two">
+  return <section className="intents-shell">
+    <div className="intents-hero">
+      <div>
+        <p className="eyebrow">Intents and routing</p>
+        <h2>Classification rules and handoff control</h2>
+        <p className="muted">Configure intent labels, multilingual keywords, response sources, ownership, escalation, and human handoff behavior for this tenant.</p>
+      </div>
+      <div className="intents-summary-grid" aria-label="Intent routing summary">
+        <div><span>Total intents</span><strong>{intents.length}</strong></div>
+        <div><span>Enabled</span><strong>{enabledIntentCount}</strong></div>
+        <div><span>Handoff routes</span><strong>{handoffRouteCount}</strong></div>
+        <div><span>High priority</span><strong>{highPriorityRouteCount}</strong></div>
+        <div><span>Keywords</span><strong>{keywordCount}</strong></div>
+      </div>
+    </div>
+
+    <div className="config-page config-page-two intents-workspace">
     <form className="card config-editor-card intents-editor-card" onSubmit={submit}>
       <div className="config-section-head">
         <div>
-          <p className="eyebrow">Intent and routing manager</p>
+          <p className="eyebrow">Rule editor</p>
           <h3>{editingId ? 'Edit tenant intent' : 'Create tenant intent'}</h3>
+          <p className="muted">Keep classification, answer source, and routing decisions in one controlled workflow.</p>
         </div>
         {editingId && <button type="button" className="secondary" onClick={resetForm}>New intent</button>}
       </div>
@@ -2591,7 +2612,7 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
         {responseMode === 'business_settings' && <p className="muted">Use live tenant Settings data for answers like branch location, opening hours, or support phone. The bot will generate the reply at runtime in the customer&apos;s language.</p>}
       </div>
       <div className="config-block">
-        <div className="config-language-head"><strong>Routing behavior</strong></div>
+        <div className="config-language-head"><strong>Routing behavior</strong><span className={`intent-route-badge ${responseBehavior === 'normal' ? 'bot' : responseBehavior === 'offer_handoff' ? 'offer' : 'handoff'}`}>{responseBehavior === 'normal' ? 'Bot controlled' : responseBehavior === 'offer_handoff' ? 'Optional handoff' : 'Human handoff'}</span></div>
         <label>What should happen after this intent?
           <select value={responseBehavior} onChange={(e) => {
             const next = e.target.value;
@@ -2660,17 +2681,21 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
     <div className="card config-library-card">
       <div className="config-section-head">
         <div>
-          <p className="eyebrow">Saved intents</p>
+          <p className="eyebrow">Routing library</p>
           <h3>{sortedIntents.length} tenant intents</h3>
+          <p className="muted">Scan enabled state, response source, ownership, keywords, and escalation posture.</p>
         </div>
       </div>
       <div className="config-card-list">
-        {sortedIntents.length === 0 && <p className="muted">No intents yet.</p>}
+        {sortedIntents.length === 0 && <div className="intent-empty-state"><strong>No intents yet</strong><p>Create the first tenant intent to start routing customer messages to bot answers or staff handoff.</p></div>}
         {sortedIntents.map((intent) => {
           const route = routingByIntent.get(intent.code);
           const arKeywords = intent.keywords.filter((item) => item.lang === 'ar');
           const enKeywords = intent.keywords.filter((item) => item.lang === 'en');
-          return <article className="config-item-card intent-item-card" key={intent.id}>
+          const routeBehavior = route?.response_behavior || (route?.handoff_required ? 'immediate_handoff' : 'normal');
+          const routeClass = routeBehavior === 'offer_handoff' ? 'offer' : routeBehavior === 'immediate_handoff' ? 'handoff' : 'bot';
+          const priorityClass = route?.priority === 'urgent' ? 'urgent' : route?.priority === 'high' ? 'high' : 'normal';
+          return <article className={`config-item-card intent-item-card route-${routeClass} priority-${priorityClass}`} key={intent.id}>
             <div className="config-item-head">
               <div>
                 <strong>{intent.label}</strong>
@@ -2679,7 +2704,8 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
                   <span className="config-badge">{intentLanguageLabel(intent.supported_languages)}</span>
                   <span className={`config-status-pill ${intent.enabled ? 'active' : 'inactive'}`}>{intent.enabled ? 'enabled' : 'disabled'}</span>
                   <span className="config-badge secondary-pill">{intent.response_mode === 'faq' ? `FAQ: ${intent.default_response_topic_key || 'not linked'}` : intent.response_mode === 'business_settings' ? `Settings auto: ${intent.default_response_topic_key || 'dynamic'}` : 'Custom response'}</span>
-                  <span className="config-badge secondary-pill">{route?.response_behavior === 'offer_handoff' ? 'Offer handoff' : route?.response_behavior === 'immediate_handoff' ? 'Immediate handoff' : 'Bot answer only'}</span>
+                  <span className={`intent-route-badge ${routeClass}`}>{routeBehavior === 'offer_handoff' ? 'Offer handoff' : routeBehavior === 'immediate_handoff' ? 'Immediate handoff' : 'Bot answer only'}</span>
+                  <span className={`intent-priority-badge ${priorityClass}`}>{route?.priority || 'normal'}</span>
                 </div>
               </div>
             </div>
@@ -2717,6 +2743,7 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
           </article>;
         })}
       </div>
+    </div>
     </div>
     {pendingDelete && <div className="confirm-overlay" role="dialog" aria-modal="true">
       <div className="confirm-card">

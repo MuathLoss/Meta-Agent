@@ -2732,6 +2732,7 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
 }
 
 function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {
+  const channelOptions = ['whatsapp', 'telegram', 'email', 'instagram', 'facebook', 'web_chat'];
   const [channel, setChannel] = useState('whatsapp');
   const [status, setStatus] = useState('configured');
   const [enabled, setEnabled] = useState('true');
@@ -2741,6 +2742,13 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
   const [verifyToken, setVerifyToken] = useState('');
   const [appSecret, setAppSecret] = useState('');
   const [botToken, setBotToken] = useState('');
+  const [savingChannel, setSavingChannel] = useState(false);
+  const [channelMessage, setChannelMessage] = useState<string | null>(null);
+
+  const configuredCount = rows.filter((row) => ['connected', 'configured', 'active'].includes(row.status)).length;
+  const credentialCount = rows.filter((row) => row.has_credentials).length;
+  const liveChannelCount = rows.filter((row) => row.public_config?.live_send_enabled === true).length;
+  const selectedChannelRow = rows.find((row) => row.channel_type === channel);
 
   useEffect(() => {
     const current = rows.find((row) => row.channel_type === channel);
@@ -2774,6 +2782,8 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    setSavingChannel(true);
+    setChannelMessage(null);
     const publicConfig: Record<string, unknown> = {
       enabled: enabled === 'true',
       live_send_enabled: liveSendEnabled === 'true',
@@ -2794,53 +2804,122 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       credentials.bot_token = botToken.trim();
     }
 
-    await api.saveChannel(token, tenantSlug, channel, { status, public_config: publicConfig, credentials });
-    await reload();
+    try {
+      await api.saveChannel(token, tenantSlug, channel, { status, public_config: publicConfig, credentials });
+      await reload();
+      setChannelMessage('Channel settings saved. Credential values remain hidden after storage.');
+    } finally {
+      setSavingChannel(false);
+    }
   }
 
-  return <section className="grid two channels-layout">
-    <form className="card form-stack channel-form-card" onSubmit={submit}>
-      <p className="eyebrow">Channel settings</p>
-      <h3>Tenant-scoped channel config</h3>
-      <label>Channel<select value={channel} onChange={(e) => setChannel(e.target.value)}><option value="whatsapp">whatsapp</option><option value="telegram">telegram</option><option value="email">email</option><option value="instagram">instagram</option><option value="facebook">facebook</option><option value="web_chat">web_chat</option></select></label>
-      <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="connected">connected</option><option value="configured">configured</option><option value="not_connected">not_connected</option><option value="future">future</option><option value="active">active</option></select></label>
-      <div className="two-field-row">
-        <label>Enabled<select value={enabled} onChange={(e) => setEnabled(e.target.value)}><option value="true">true</option><option value="false">false</option></select></label>
-        <label>Live send enabled<select value={liveSendEnabled} onChange={(e) => setLiveSendEnabled(e.target.value)}><option value="true">true</option><option value="false">false</option></select></label>
+  return <section className="channels-shell">
+    <div className="channels-hero">
+      <div>
+        <p className="eyebrow">Channel settings</p>
+        <h2>Tenant communication channels</h2>
+        <p className="muted">Manage channel availability, live-send posture, and encrypted provider credentials without exposing raw secret values.</p>
       </div>
-      {channel === 'whatsapp' && <>
-        <label>Phone number ID<input placeholder="demo" value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value)} /></label>
-        <label>Access token<input placeholder="Paste WhatsApp access token" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} /></label>
-        <label>Verify token<input placeholder="demo-verify" value={verifyToken} onChange={(e) => setVerifyToken(e.target.value)} /></label>
-        <label>App secret<input placeholder="pending" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} /></label>
-      </>}
-      {channel === 'telegram' && <label>Bot token<input placeholder="123456:telegram-demo-token" value={botToken} onChange={(e) => setBotToken(e.target.value)} /></label>}
-      {channel !== 'whatsapp' && channel !== 'telegram' && <p className="muted">This channel currently only needs basic status and enabled settings.</p>}
-      <button>Save encrypted config</button>
-    </form>
-    <div className="card channel-list-card">
-      <h3>Channels</h3>
-      <div className="channel-table">
-        {rows.map((row) => {
-          const enabledFlag = row.public_config?.enabled === true;
-          const liveFlag = row.public_config?.live_send_enabled === true;
-          const fullyConnected = enabledFlag && row.has_credentials && liveFlag && ['connected', 'configured', 'active'].includes(row.status);
-          return <div className="channel-status-card" key={row.channel_type}>
-            <div className="channel-status-head">
-              <div className={`status-dot ${fullyConnected ? 'on' : 'off'}`} />
-              <div>
-                <strong>{row.channel_type}</strong>
-                <p>{row.status}</p>
+      <div className="channels-summary-grid" aria-label="Channel settings summary">
+        <div><span>Configured</span><strong>{configuredCount}</strong></div>
+        <div><span>Credentials</span><strong>{credentialCount}</strong></div>
+        <div><span>Live send</span><strong>{liveChannelCount}</strong></div>
+      </div>
+    </div>
+
+    <div className="grid two channels-layout">
+      <form className="card form-stack channel-form-card" onSubmit={submit}>
+        <div className="channel-card-head">
+          <div>
+            <p className="eyebrow">Secure setup</p>
+            <h3>Tenant-scoped channel config</h3>
+            <p className="muted">Update one channel at a time. Existing credential-like values are masked and should only be replaced when rotating configuration.</p>
+          </div>
+          <span className={`channel-state-badge ${selectedChannelRow?.has_credentials ? 'connected' : status === 'future' ? 'future' : 'pending'}`}>{selectedChannelRow?.has_credentials ? 'Credentials saved' : status === 'future' ? 'Future channel' : 'Needs credentials'}</span>
+        </div>
+        <div className="channel-form-grid">
+          <label>Channel
+            <span className="field-helper">Choose the tenant channel to configure.</span>
+            <select value={channel} onChange={(e) => setChannel(e.target.value)}>{channelOptions.map((option) => <option key={option} value={option}>{option.split('_').join(' ')}</option>)}</select>
+          </label>
+          <label>Status
+            <span className="field-helper">Use a safe operational state, not provider secrets.</span>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}><option value="connected">connected</option><option value="configured">configured</option><option value="not_connected">not_connected</option><option value="future">future</option><option value="active">active</option></select>
+          </label>
+          <div className="two-field-row">
+            <label>Enabled
+              <span className="field-helper">Controls whether the tenant can use this channel.</span>
+              <select value={enabled} onChange={(e) => setEnabled(e.target.value)}><option value="true">true</option><option value="false">false</option></select>
+            </label>
+            <label>Live send enabled
+              <span className="field-helper">Only enable after provider credentials and testing are ready.</span>
+              <select value={liveSendEnabled} onChange={(e) => setLiveSendEnabled(e.target.value)}><option value="true">true</option><option value="false">false</option></select>
+            </label>
+          </div>
+        </div>
+        {channel === 'whatsapp' && <div className="channel-secret-grid">
+          <label>Phone number ID
+            <span className="field-helper">Stored value is hidden. Enter a replacement only when updating this provider setting.</span>
+            <input type="password" placeholder={selectedChannelRow?.public_config?.phone_number_id ? 'Saved value hidden' : 'Enter provider value'} value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value)} autoComplete="off" />
+          </label>
+          <label>Access token
+            <span className="field-helper">Encrypted after save. The current token is never displayed.</span>
+            <input type="password" placeholder="Paste replacement token" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} autoComplete="off" />
+          </label>
+          <label>Verify token
+            <span className="field-helper">Encrypted after save and hidden from status cards.</span>
+            <input type="password" placeholder="Paste replacement verify token" value={verifyToken} onChange={(e) => setVerifyToken(e.target.value)} autoComplete="off" />
+          </label>
+          <label>App secret
+            <span className="field-helper">Encrypted after save. Do not share this outside the tenant admin workflow.</span>
+            <input type="password" placeholder="Paste replacement app secret" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} autoComplete="off" />
+          </label>
+        </div>}
+        {channel === 'telegram' && <div className="channel-secret-grid"><label>Bot token
+          <span className="field-helper">Encrypted after save. The current bot token is never displayed.</span>
+          <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste bot token'} value={botToken} onChange={(e) => setBotToken(e.target.value)} autoComplete="off" />
+        </label></div>}
+        {channel !== 'whatsapp' && channel !== 'telegram' && <div className="channel-help-note"><strong>Future channel</strong><p>This channel currently stores only safe status and enabled settings. Provider credentials are not required here yet.</p></div>}
+        {channelMessage && <p className="settings-status success">{channelMessage}</p>}
+        <div className="channel-form-actions">
+          <button disabled={savingChannel}>{savingChannel ? 'Saving...' : 'Save encrypted config'}</button>
+        </div>
+      </form>
+
+      <div className="card channel-list-card">
+        <div className="channel-card-head">
+          <div>
+            <p className="eyebrow">Connection posture</p>
+            <h3>Channels</h3>
+            <p className="muted">Safe status overview only. Raw provider identifiers, tokens, and secrets are never shown here.</p>
+          </div>
+        </div>
+        <div className="channel-table">
+          {channelOptions.map((channelType) => {
+            const row = rows.find((item) => item.channel_type === channelType) || { channel_type: channelType, status: channelType === 'whatsapp' ? 'configured' : channelType === 'telegram' ? 'not_connected' : 'future', public_config: {}, has_credentials: false };
+            const enabledFlag = row.public_config?.enabled === true;
+            const liveFlag = row.public_config?.live_send_enabled === true;
+            const fullyConnected = enabledFlag && row.has_credentials && liveFlag && ['connected', 'configured', 'active'].includes(row.status);
+            const statusClass = fullyConnected ? 'connected' : row.status === 'future' ? 'future' : enabledFlag ? 'pending' : 'disabled';
+            const providerIdConfigured = Boolean(row.public_config?.phone_number_id);
+            return <div className="channel-status-card" key={row.channel_type}>
+              <div className="channel-status-head">
+                <div className={`status-dot ${fullyConnected ? 'on' : 'off'}`} />
+                <div>
+                  <strong>{row.channel_type.split('_').join(' ')}</strong>
+                  <p>{fullyConnected ? 'Ready for live messaging' : row.status === 'future' ? 'Planned channel' : enabledFlag ? 'Configuration pending' : 'Disabled for tenant'}</p>
+                </div>
+                <span className={`channel-state-badge ${statusClass}`}>{row.status}</span>
               </div>
-            </div>
-            <div className="channel-status-grid">
-              <div><small>Enabled</small><span>{enabledFlag ? 'true' : 'false'}</span></div>
-              <div><small>Live send</small><span>{liveFlag ? 'true' : 'false'}</span></div>
-              <div><small>Credentials</small><span>{row.has_credentials ? 'saved' : 'missing'}</span></div>
-              <div><small>Phone ID</small><span>{String(row.public_config?.phone_number_id || 'not set')}</span></div>
-            </div>
-          </div>;
-        })}
+              <div className="channel-status-grid">
+                <div><small>Enabled</small><span>{enabledFlag ? 'Enabled' : 'Disabled'}</span></div>
+                <div><small>Live send</small><span>{liveFlag ? 'Enabled' : 'Off'}</span></div>
+                <div><small>Credentials</small><span>{row.has_credentials ? 'Stored securely' : 'Not stored'}</span></div>
+                <div><small>Provider ID</small><span>{providerIdConfigured ? 'Configured, hidden' : 'Not configured'}</span></div>
+              </div>
+            </div>;
+          })}
+        </div>
       </div>
     </div>
   </section>;

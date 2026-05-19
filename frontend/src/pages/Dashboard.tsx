@@ -968,28 +968,50 @@ function Settings({ tenant, branches, token, tenantSlug, reload }: { tenant: Ten
   const [editEveningFrom, setEditEveningFrom] = useState('16:30');
   const [editEveningTo, setEditEveningTo] = useState('21:30');
   const [savingBranchId, setSavingBranchId] = useState<number | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileStatus, setProfileStatus] = useState<string | null>(null);
+  const [addingBranch, setAddingBranch] = useState(false);
+  const [branchStatus, setBranchStatus] = useState<string | null>(null);
   useEffect(() => { setDisplayName(tenant?.display_name || ''); setSupportPhone(tenant?.brand.support_phone || ''); }, [tenant]);
-  async function saveProfile(e: FormEvent) { e.preventDefault(); await api.updateProfile(token, tenantSlug, { display_name: displayName, support_phone: supportPhone }); await reload(); }
+  async function saveProfile(e: FormEvent) {
+    e.preventDefault();
+    setSavingProfile(true);
+    setProfileStatus(null);
+    try {
+      await api.updateProfile(token, tenantSlug, { display_name: displayName, support_phone: supportPhone });
+      await reload();
+      setProfileStatus('Business profile saved.');
+    } finally {
+      setSavingProfile(false);
+    }
+  }
   const branchHoursPreview = buildBranchHoursJson(morningEnabled, morningFrom, morningTo, eveningEnabled, eveningFrom, eveningTo);
   async function addBranch(e: FormEvent) {
     e.preventDefault();
-    await api.createBranch(token, tenantSlug, {
-      name: branchName,
-      address: branchAddress,
-      city: 'Jeddah',
-      maps_url: null,
-      hours_json: branchHoursPreview,
-      is_active: true,
-    });
-    setBranchName('');
-    setBranchAddress('');
-    setMorningEnabled(true);
-    setMorningFrom('09:00');
-    setMorningTo('13:00');
-    setEveningEnabled(true);
-    setEveningFrom('16:30');
-    setEveningTo('21:30');
-    await reload();
+    setAddingBranch(true);
+    setBranchStatus(null);
+    try {
+      await api.createBranch(token, tenantSlug, {
+        name: branchName,
+        address: branchAddress,
+        city: 'Jeddah',
+        maps_url: null,
+        hours_json: branchHoursPreview,
+        is_active: true,
+      });
+      setBranchName('');
+      setBranchAddress('');
+      setMorningEnabled(true);
+      setMorningFrom('09:00');
+      setMorningTo('13:00');
+      setEveningEnabled(true);
+      setEveningFrom('16:30');
+      setEveningTo('21:30');
+      await reload();
+      setBranchStatus('Branch added to business settings.');
+    } finally {
+      setAddingBranch(false);
+    }
   }
   async function confirmDeleteBranch() {
     if (!pendingDeleteBranch) return;
@@ -1035,7 +1057,138 @@ function Settings({ tenant, branches, token, tenantSlug, reload }: { tenant: Ten
     morningEnabled ? { label: 'Morning', from: morningFrom, to: morningTo } : null,
     eveningEnabled ? { label: 'Evening', from: eveningFrom, to: eveningTo } : null,
   ].filter(Boolean) as Array<{ label: string; from: string; to: string }>;
-  return <section className="grid two settings-layout"><form className="card form-stack settings-panel" onSubmit={saveProfile}><p className="eyebrow">Business settings</p><h3>Profile</h3><label>Display name<input value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></label><label>Support phone<input value={supportPhone} onChange={(e) => setSupportPhone(e.target.value)} /></label><button>Save profile</button></form><form className="card form-stack settings-panel" onSubmit={addBranch}><p className="eyebrow">Branches</p><h3>Add branch</h3><label>Name<input value={branchName} onChange={(e) => setBranchName(e.target.value)} /></label><label>Address<input value={branchAddress} onChange={(e) => setBranchAddress(e.target.value)} /></label><div className="hours-builder"><div className="hours-period"><div className="row-between"><strong>Morning hours</strong><label className="check-row compact-check"><input type="checkbox" checked={morningEnabled} onChange={(e) => setMorningEnabled(e.target.checked)} /> Open in morning</label></div>{morningEnabled ? <div className="time-range"><label>From<input type="time" value={morningFrom} onChange={(e) => setMorningFrom(e.target.value)} /></label><label>To<input type="time" value={morningTo} onChange={(e) => setMorningTo(e.target.value)} /></label></div> : <p className="muted">Morning period disabled.</p>}</div><div className="hours-period"><div className="row-between"><strong>Evening hours</strong><label className="check-row compact-check"><input type="checkbox" checked={eveningEnabled} onChange={(e) => setEveningEnabled(e.target.checked)} /> Open in evening</label></div>{eveningEnabled ? <div className="time-range"><label>From<input type="time" value={eveningFrom} onChange={(e) => setEveningFrom(e.target.value)} /></label><label>To<input type="time" value={eveningTo} onChange={(e) => setEveningTo(e.target.value)} /></label></div> : <p className="muted">Evening period disabled.</p>}</div><div className="hours-preview"><p className="eyebrow">Hours Preview</p><div className="hours-preview-grid">{previewPeriods.length > 0 ? previewPeriods.map((period) => <div className="hours-preview-card" key={period.label}><strong>{period.label}</strong><span>{formatClockTime(period.from)} - {formatClockTime(period.to)}</span></div>) : <div className="hours-preview-card disabled"><strong>Closed</strong><span>No active periods selected</span></div>}</div></div></div><button disabled={!morningEnabled && !eveningEnabled}>Add branch</button></form><div className="card wide"><h3>Current branches</h3><div className="branch-grid">{branches.length === 0 && <p className="muted">No branches yet.</p>}{branches.map((branch) => { const periods = Array.isArray(branch.hours_json?.periods) ? branch.hours_json.periods as Array<{ from?: string; to?: string }> : []; return <div className="branch-card" key={branch.id}><button className="close-chip branch-close-chip" type="button" aria-label={`Delete ${branch.name}`} onClick={() => setPendingDeleteBranch(branch)}>x</button><div className="branch-head"><strong>{branch.name}</strong></div><div className="branch-meta"><div><small>Address</small><span>{branch.address || 'No address yet'}</span></div><div><small>City</small><span>{branch.city || 'Not set'}</span></div></div><div className="branch-hours"><small>Hours</small>{periods.length > 0 ? periods.map((period, index) => <span className="branch-hour-pill" key={`${branch.id}-${index}`}>{formatClockTime(period.from || '')} - {formatClockTime(period.to || '')}</span>) : <span className="muted">No hours saved</span>}</div><div className="button-row"><button className="secondary" type="button" onClick={() => openEditBranch(branch)}>Edit branch</button></div></div>; })}</div></div>{editingBranch && <div className="confirm-overlay" role="dialog" aria-modal="true"><div className="confirm-card"><h3>Edit branch</h3><div className="form-stack"><label>Name<input value={editBranchName} onChange={(e) => setEditBranchName(e.target.value)} /></label><label>Address<input value={editBranchAddress} onChange={(e) => setEditBranchAddress(e.target.value)} /></label><div className="hours-period"><div className="row-between"><strong>Morning hours</strong><label className="check-row compact-check"><input type="checkbox" checked={editMorningEnabled} onChange={(e) => setEditMorningEnabled(e.target.checked)} /> Open in morning</label></div>{editMorningEnabled ? <div className="time-range"><label>From<input type="time" value={editMorningFrom} onChange={(e) => setEditMorningFrom(e.target.value)} /></label><label>To<input type="time" value={editMorningTo} onChange={(e) => setEditMorningTo(e.target.value)} /></label></div> : <p className="muted">Morning period disabled.</p>}</div><div className="hours-period"><div className="row-between"><strong>Evening hours</strong><label className="check-row compact-check"><input type="checkbox" checked={editEveningEnabled} onChange={(e) => setEditEveningEnabled(e.target.checked)} /> Open in evening</label></div>{editEveningEnabled ? <div className="time-range"><label>From<input type="time" value={editEveningFrom} onChange={(e) => setEditEveningFrom(e.target.value)} /></label><label>To<input type="time" value={editEveningTo} onChange={(e) => setEditEveningTo(e.target.value)} /></label></div> : <p className="muted">Evening period disabled.</p>}</div></div><div className="button-row"><button type="button" onClick={() => void saveBranchEdit()} disabled={savingBranchId === editingBranch.id}>{savingBranchId === editingBranch.id ? 'Saving...' : 'Save branch'}</button><button className="secondary" type="button" onClick={() => setEditingBranch(null)} disabled={savingBranchId === editingBranch.id}>Cancel</button></div></div></div>}{pendingDeleteBranch && <div className="confirm-overlay" role="dialog" aria-modal="true"><div className="confirm-card"><h3>Are you sure you want to delete this branch?</h3><p className="muted">{pendingDeleteBranch.name}</p><div className="button-row"><button onClick={() => void confirmDeleteBranch()} disabled={deletingBranchId === pendingDeleteBranch.id}>{deletingBranchId === pendingDeleteBranch.id ? 'Deleting...' : 'Accept'}</button><button className="secondary" onClick={() => setPendingDeleteBranch(null)} disabled={deletingBranchId === pendingDeleteBranch.id}>Cancel</button></div></div></div>}</section>;
+  const logoUrl = resolveAssetUrl(tenant?.brand.logo_url);
+  const activeBranchCount = branches.filter((branch) => branch.is_active !== false).length;
+  const savedPeriodsCount = branches.reduce((count, branch) => {
+    const periods = Array.isArray(branch.hours_json?.periods) ? branch.hours_json.periods : [];
+    return count + periods.length;
+  }, 0);
+  return <section className="settings-shell">
+    <div className="settings-hero">
+      <div>
+        <p className="eyebrow">Business settings</p>
+        <h2>Workspace profile and operating details</h2>
+        <p className="muted">Keep the public business identity, support contact, branches, and hours ready for automated customer replies.</p>
+      </div>
+      <div className="settings-summary-grid" aria-label="Business settings summary">
+        <div><span>Branches</span><strong>{branches.length}</strong></div>
+        <div><span>Active</span><strong>{activeBranchCount}</strong></div>
+        <div><span>Hours blocks</span><strong>{savedPeriodsCount}</strong></div>
+      </div>
+    </div>
+
+    <div className="grid two settings-layout">
+      <form className="card form-stack settings-panel settings-profile-card" onSubmit={saveProfile}>
+        <div className="settings-card-head">
+          <div>
+            <p className="eyebrow">Profile</p>
+            <h3>Business identity</h3>
+            <p className="muted">This information powers workspace labels and settings-driven bot answers.</p>
+          </div>
+          <div className="settings-brand-tile" aria-label="Current brand logo">
+            {logoUrl
+              ? <img src={logoUrl} alt={`${tenant?.display_name || tenantSlug} logo`} className="brand-mark-image" />
+              : <span>{initialsFromName(displayName || tenantSlug)}</span>}
+          </div>
+        </div>
+        <div className="settings-field-group">
+          <label>Display name
+            <span className="field-helper">Shown across the tenant workspace and customer-facing references.</span>
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          </label>
+          <label>Support phone
+            <span className="field-helper">Used by the agent for contact and escalation answers.</span>
+            <input value={supportPhone} onChange={(e) => setSupportPhone(e.target.value)} placeholder="+966..." />
+          </label>
+        </div>
+        {profileStatus && <p className="settings-status success">{profileStatus}</p>}
+        <div className="settings-actions">
+          <button disabled={savingProfile}>{savingProfile ? 'Saving...' : 'Save profile'}</button>
+        </div>
+      </form>
+
+      <form className="card form-stack settings-panel settings-branch-form" onSubmit={addBranch}>
+        <div className="settings-card-head">
+          <div>
+            <p className="eyebrow">Branches</p>
+            <h3>Add branch</h3>
+            <p className="muted">Create a customer-ready location with the hours your agent can safely quote.</p>
+          </div>
+        </div>
+        <div className="settings-field-group">
+          <label>Name
+            <span className="field-helper">Use the public branch or location name.</span>
+            <input value={branchName} onChange={(e) => setBranchName(e.target.value)} />
+          </label>
+          <label>Address
+            <span className="field-helper">Keep it concise enough to appear in chat replies.</span>
+            <input value={branchAddress} onChange={(e) => setBranchAddress(e.target.value)} />
+          </label>
+        </div>
+        <div className="hours-builder">
+          <div className="hours-period settings-hours-period">
+            <div className="row-between">
+              <strong>Morning hours</strong>
+              <label className="check-row compact-check"><input type="checkbox" checked={morningEnabled} onChange={(e) => setMorningEnabled(e.target.checked)} /> Open in morning</label>
+            </div>
+            {morningEnabled ? <div className="time-range"><label>From<input type="time" value={morningFrom} onChange={(e) => setMorningFrom(e.target.value)} /></label><label>To<input type="time" value={morningTo} onChange={(e) => setMorningTo(e.target.value)} /></label></div> : <p className="muted">Morning period disabled.</p>}
+          </div>
+          <div className="hours-period settings-hours-period">
+            <div className="row-between">
+              <strong>Evening hours</strong>
+              <label className="check-row compact-check"><input type="checkbox" checked={eveningEnabled} onChange={(e) => setEveningEnabled(e.target.checked)} /> Open in evening</label>
+            </div>
+            {eveningEnabled ? <div className="time-range"><label>From<input type="time" value={eveningFrom} onChange={(e) => setEveningFrom(e.target.value)} /></label><label>To<input type="time" value={eveningTo} onChange={(e) => setEveningTo(e.target.value)} /></label></div> : <p className="muted">Evening period disabled.</p>}
+          </div>
+          <div className="hours-preview settings-hours-preview">
+            <p className="eyebrow">Hours preview</p>
+            <div className="hours-preview-grid">{previewPeriods.length > 0 ? previewPeriods.map((period) => <div className="hours-preview-card" key={period.label}><strong>{period.label}</strong><span>{formatClockTime(period.from)} - {formatClockTime(period.to)}</span></div>) : <div className="hours-preview-card disabled"><strong>Closed</strong><span>No active periods selected</span></div>}</div>
+          </div>
+        </div>
+        {branchStatus && <p className="settings-status success">{branchStatus}</p>}
+        <div className="settings-actions">
+          <button disabled={addingBranch || (!morningEnabled && !eveningEnabled)}>{addingBranch ? 'Adding...' : 'Add branch'}</button>
+        </div>
+      </form>
+
+      <div className="card wide settings-branches-card">
+        <div className="settings-card-head">
+          <div>
+            <p className="eyebrow">Saved locations</p>
+            <h3>Current branches</h3>
+            <p className="muted">Review the branch details your runtime agent can use for location, schedule, and contact responses.</p>
+          </div>
+        </div>
+        <div className="branch-grid settings-branch-grid">
+          {branches.length === 0 && <div className="settings-empty-state"><strong>No branches yet</strong><p>Add the first location above so the agent can answer branch and hours questions.</p></div>}
+          {branches.map((branch) => {
+            const periods = Array.isArray(branch.hours_json?.periods) ? branch.hours_json.periods as Array<{ from?: string; to?: string }> : [];
+            return <div className="branch-card settings-branch-card" key={branch.id}>
+              <button className="close-chip branch-close-chip" type="button" aria-label={`Delete ${branch.name}`} onClick={() => setPendingDeleteBranch(branch)}>x</button>
+              <div className="branch-head">
+                <div>
+                  <strong>{branch.name}</strong>
+                  <p>{branch.is_active === false ? 'Inactive branch' : 'Active branch'}</p>
+                </div>
+              </div>
+              <div className="branch-meta">
+                <div><small>Address</small><span>{branch.address || 'No address yet'}</span></div>
+                <div><small>City</small><span>{branch.city || 'Not set'}</span></div>
+              </div>
+              <div className="branch-hours">
+                <small>Hours</small>
+                {periods.length > 0 ? periods.map((period, index) => <span className="branch-hour-pill" key={`${branch.id}-${index}`}>{formatClockTime(period.from || '')} - {formatClockTime(period.to || '')}</span>) : <span className="muted">No hours saved</span>}
+              </div>
+              <div className="button-row"><button className="secondary" type="button" onClick={() => openEditBranch(branch)}>Edit branch</button></div>
+            </div>;
+          })}
+        </div>
+      </div>
+    </div>
+
+    {editingBranch && <div className="confirm-overlay" role="dialog" aria-modal="true"><div className="confirm-card"><h3>Edit branch</h3><div className="form-stack"><label>Name<input value={editBranchName} onChange={(e) => setEditBranchName(e.target.value)} /></label><label>Address<input value={editBranchAddress} onChange={(e) => setEditBranchAddress(e.target.value)} /></label><div className="hours-period"><div className="row-between"><strong>Morning hours</strong><label className="check-row compact-check"><input type="checkbox" checked={editMorningEnabled} onChange={(e) => setEditMorningEnabled(e.target.checked)} /> Open in morning</label></div>{editMorningEnabled ? <div className="time-range"><label>From<input type="time" value={editMorningFrom} onChange={(e) => setEditMorningFrom(e.target.value)} /></label><label>To<input type="time" value={editMorningTo} onChange={(e) => setEditMorningTo(e.target.value)} /></label></div> : <p className="muted">Morning period disabled.</p>}</div><div className="hours-period"><div className="row-between"><strong>Evening hours</strong><label className="check-row compact-check"><input type="checkbox" checked={editEveningEnabled} onChange={(e) => setEditEveningEnabled(e.target.checked)} /> Open in evening</label></div>{editEveningEnabled ? <div className="time-range"><label>From<input type="time" value={editEveningFrom} onChange={(e) => setEditEveningFrom(e.target.value)} /></label><label>To<input type="time" value={editEveningTo} onChange={(e) => setEditEveningTo(e.target.value)} /></label></div> : <p className="muted">Evening period disabled.</p>}</div></div><div className="button-row"><button type="button" onClick={() => void saveBranchEdit()} disabled={savingBranchId === editingBranch.id}>{savingBranchId === editingBranch.id ? 'Saving...' : 'Save branch'}</button><button className="secondary" type="button" onClick={() => setEditingBranch(null)} disabled={savingBranchId === editingBranch.id}>Cancel</button></div></div></div>}
+    {pendingDeleteBranch && <div className="confirm-overlay" role="dialog" aria-modal="true"><div className="confirm-card"><h3>Are you sure you want to delete this branch?</h3><p className="muted">{pendingDeleteBranch.name}</p><div className="button-row"><button onClick={() => void confirmDeleteBranch()} disabled={deletingBranchId === pendingDeleteBranch.id}>{deletingBranchId === pendingDeleteBranch.id ? 'Deleting...' : 'Accept'}</button><button className="secondary" onClick={() => setPendingDeleteBranch(null)} disabled={deletingBranchId === pendingDeleteBranch.id}>Cancel</button></div></div></div>}
+  </section>;
 }
 
 function Staff({ rows, token, tenantSlug, reload }: { rows: StaffUser[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {

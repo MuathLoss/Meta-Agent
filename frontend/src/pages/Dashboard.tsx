@@ -824,28 +824,33 @@ function UatPanel({ token, tenantSlug }: { token: string; tenantSlug: string }) 
     setCustomResult(result as unknown as Record<string, unknown>);
   }
 
-  return <section className="grid two">
-    <div className="card wide">
-      <p className="eyebrow">Academy Tenant #1 UAT</p>
-      <h3>Run safe scenario checks</h3>
-      <p className="muted">This checks tenant-scoped intent and routing results without creating customer messages.</p>
-      <button onClick={runAll}>Run academy UAT cases</button>
+  return <section className="grid two system-surface">
+    <div className="card wide system-panel">
+      <div className="system-panel-head">
+        <div>
+          <p className="eyebrow">Academy Tenant #1 UAT</p>
+          <h3>Run safe scenario checks</h3>
+          <p className="muted">This checks tenant-scoped intent and routing results without creating customer messages.</p>
+        </div>
+        <button onClick={runAll}>Run academy UAT cases</button>
+      </div>
       {status && <p className="success-text">{status}</p>}
       {run && <div className="uat-summary"><strong>{run.passed}/{run.total}</strong><span>passed · {run.mode}</span></div>}
-      {run && <div className="list">{run.results.map((r) => <div className="list-card" key={r.id}>
+      {run ? <div className="list system-list">{run.results.map((r) => <div className="list-card system-list-card" key={r.id}>
         <div className="row-between"><b>{r.id}</b><span className={r.passed ? 'pill pass-pill' : 'pill fail-pill'}>{r.passed ? 'pass' : 'check'}</span></div>
         <p>{r.message}</p>
         <small>expected {r.expected_intent}/{r.expected_action} · actual {r.actual_intent}/{r.actual_action} · confidence {Math.round(r.confidence * 100)}%</small>
         {r.matched_phrases.length > 0 && <small>matched: {r.matched_phrases.join(', ')}</small>}
-      </div>)}</div>}
+      </div>)}</div> : <div className="system-empty-state"><strong>No UAT run yet</strong><p>Run the safe scenario checks to review tenant intent and routing behavior.</p></div>}
     </div>
-    <form className="card form-stack" onSubmit={runCustom}>
+    <form className="card form-stack system-panel" onSubmit={runCustom}>
       <p className="eyebrow">Custom tenant test</p>
       <h3>Try one message</h3>
+      <p className="muted">Run a single classification check without creating a customer conversation.</p>
       <label>Message<input value={customMessage} onChange={(e) => setCustomMessage(e.target.value)} /></label>
       <label>Expected intent<input value={customExpectedIntent} onChange={(e) => setCustomExpectedIntent(e.target.value)} /></label>
       <button>Run custom test</button>
-      {customResult && <pre>{JSON.stringify(customResult, null, 2)}</pre>}
+      {customResult && <pre className="system-pre">{JSON.stringify(customResult, null, 2)}</pre>}
     </form>
   </section>;
 }
@@ -883,31 +888,38 @@ function DeploymentPanel({ token, tenantSlug }: { token: string; tenantSlug: str
     setSimulation(result as unknown as Record<string, unknown>);
   }
 
-  return <section className="grid two">
-    <div className="card wide">
-      <p className="eyebrow">Deployment readiness</p>
-      <h3>Staging / production checklist</h3>
-      <button onClick={loadDeployment}>Refresh deployment status</button>
+  return <section className="grid two system-surface">
+    <div className="card wide system-panel">
+      <div className="system-panel-head">
+        <div>
+          <p className="eyebrow">Deployment readiness</p>
+          <h3>Staging / production checklist</h3>
+          <p className="muted">Secret-safe operational checks for release readiness.</p>
+        </div>
+        <button onClick={loadDeployment}>Refresh deployment status</button>
+      </div>
       {error && <p className="error-box">{error}</p>}
       {checklist && <div className="uat-summary"><strong>{checklist.passed}/{checklist.total}</strong><span>passed · env {checklist.environment}</span></div>}
       <div className="checklist">{checklist?.items.map((i) => <div key={i.key} className={i.passed ? 'pass' : 'fail'}><span>{i.passed ? '✓' : '•'}</span>{i.label}{i.detail ? <small> · {i.detail}</small> : null}</div>)}</div>
     </div>
-    <div className="card">
+    <div className="card system-panel">
       <p className="eyebrow">Platform environment</p>
       <h3>Secret-safe env status</h3>
-      <div className="list">{environment?.items.map((i) => <div className="list-card" key={i.key}><b>{i.key}</b><p>{i.purpose}</p><small>{i.configured ? 'configured' : 'missing'} · {i.secret ? 'secret' : i.value_preview}</small></div>)}</div>
+      <p className="muted">Shows configuration status only. Secret values stay hidden.</p>
+      <div className="list system-list">{environment?.items.map((i) => <div className="list-card system-list-card" key={i.key}><b>{i.key}</b><p>{i.purpose}</p><small>{i.configured ? 'configured' : 'missing'} · {i.secret ? 'secret value hidden' : i.value_preview}</small></div>)}</div>
     </div>
-    <div className="card">
+    <div className="card system-panel">
       <p className="eyebrow">WhatsApp go-live package</p>
       <h3>Still required before academy live hookup</h3>
-      {goLive && <pre>{JSON.stringify(goLive, null, 2)}</pre>}
+      <p className="muted">Provider-facing requirements and readiness notes.</p>
+      {goLive ? <pre className="system-pre">{JSON.stringify(goLive, null, 2)}</pre> : <div className="system-empty-state compact"><strong>No package loaded</strong><p>Refresh deployment status to load the go-live package.</p></div>}
     </div>
-    <div className="card">
+    <div className="card system-panel">
       <p className="eyebrow">Webhook UAT fixtures</p>
       <h3>Signed payload samples</h3>
       <p className="muted">These normalize and classify realistic WhatsApp payloads without creating customer messages.</p>
-      <div className="list">{fixtures.slice(0, 5).map((f) => <div className="list-card" key={f.id}><b>{f.id}</b><p>{f.message}</p><small>{f.x_hub_signature_256 ? 'signed fixture available' : 'signature unavailable until app_secret is configured'}</small><button onClick={() => void simulate(f.id)}>Simulate</button></div>)}</div>
-      {simulation && <pre>{JSON.stringify(simulation, null, 2)}</pre>}
+      <div className="list system-list">{fixtures.slice(0, 5).map((f) => <div className="list-card system-list-card" key={f.id}><b>{f.id}</b><p>{f.message}</p><small>{f.x_hub_signature_256 ? 'signed fixture available' : 'signature unavailable until app secret is configured'}</small><button onClick={() => void simulate(f.id)}>Simulate</button></div>)}</div>
+      {simulation && <pre className="system-pre">{JSON.stringify(simulation, null, 2)}</pre>}
     </div>
   </section>;
 }
@@ -936,33 +948,38 @@ function HandoffPanel({ token, tenantSlug }: { token: string; tenantSlug: string
 
   useEffect(() => { void load(); }, []);
 
-  return <section className="grid two">
-    <div className="card wide">
-      <p className="eyebrow">Final acceptance</p>
-      <h3>Definition-of-done tracker</h3>
-      <button onClick={load}>Refresh final handoff status</button>
+  return <section className="grid two system-surface">
+    <div className="card wide system-panel">
+      <div className="system-panel-head">
+        <div>
+          <p className="eyebrow">Final acceptance</p>
+          <h3>Definition-of-done tracker</h3>
+          <p className="muted">Internal handoff readiness across acceptance, blockers, and client package items.</p>
+        </div>
+        <button onClick={load}>Refresh final handoff status</button>
+      </div>
       {error && <p className="error-box">{error}</p>}
       {summary && <div className="uat-summary"><strong>{summary.passed}/{summary.total}</strong><span>{summary.project_status} · env {summary.environment}</span></div>}
       <div className="checklist">{summary?.items.map((i) => <div key={i.key} className={i.passed ? 'pass' : 'fail'}><span>{i.passed ? '✓' : '•'}</span>{i.label}{i.detail ? <small> · {i.detail}</small> : null}</div>)}</div>
     </div>
-    <div className="card">
+    <div className="card system-panel">
       <p className="eyebrow">Tenant evidence</p>
       <h3>Configuration and operations counts</h3>
       {summary && <div className="metric-grid">{Object.entries(summary.counts).map(([k, v]) => <div className="metric" key={k}><strong>{v}</strong><span>{k}</span></div>)}</div>}
     </div>
-    <div className="card">
+    <div className="card system-panel">
       <p className="eyebrow">Go-live blockers</p>
       <h3>{blockers?.blocked ? 'Still blocked' : 'No blockers'}</h3>
-      <div className="list">{blockers?.blockers.map((b) => <div className="list-card" key={b.key}><b>{b.label}</b><p>{b.detail || b.key}</p></div>)}</div>
+      <div className="list system-list">{blockers?.blockers.map((b) => <div className="list-card system-list-card" key={b.key}><b>{b.label}</b><p>{b.detail || b.key}</p></div>)}</div>
       <h4>External academy WhatsApp items</h4>
-      <div className="list">{blockers?.expected_remaining_external_blockers.map((b) => <div className="list-card" key={b}><b>{b}</b></div>)}</div>
+      <div className="list system-list">{blockers?.expected_remaining_external_blockers.map((b) => <div className="list-card system-list-card" key={b}><b>{b}</b></div>)}</div>
     </div>
-    <div className="card wide">
+    <div className="card wide system-panel">
       <p className="eyebrow">Client handoff package</p>
       <h3>{pkg?.product}</h3>
       {pkg && <div className="grid two">
-        <div><h4>Included capabilities</h4><div className="list">{pkg.included_capabilities.map((x) => <div className="list-card" key={x}><b>{x}</b></div>)}</div></div>
-        <div><h4>Next steps</h4><div className="list">{pkg.recommended_next_steps.map((x) => <div className="list-card" key={x}><b>{x}</b></div>)}</div></div>
+        <div><h4>Included capabilities</h4><div className="list system-list">{pkg.included_capabilities.map((x) => <div className="list-card system-list-card" key={x}><b>{x}</b></div>)}</div></div>
+        <div><h4>Next steps</h4><div className="list system-list">{pkg.recommended_next_steps.map((x) => <div className="list-card system-list-card" key={x}><b>{x}</b></div>)}</div></div>
       </div>}
     </div>
   </section>;
@@ -3348,5 +3365,15 @@ function SimpleRows<T extends object>({ rows }: { rows: T[] }) {
 
 function SimpleTable<T extends object>({ title, rows }: { title: string; rows: T[] }) {
   const keys = useMemo(() => Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).slice(0, 8), [rows]);
-  return <section className="card"><p className="eyebrow">Data</p><h3>{title}</h3>{rows.length === 0 ? <p className="muted">No rows yet.</p> : <div className="table-wrap"><table><thead><tr>{keys.map((k) => <th key={k}>{k}</th>)}</tr></thead><tbody>{rows.map((r, i) => { const obj = r as Record<string, unknown>; return <tr key={i}>{keys.map((k) => <td key={k}>{typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : String(obj[k] ?? '')}</td>)}</tr>; })}</tbody></table></div>}</section>;
+  return <section className="card audit-panel">
+    <div className="system-panel-head">
+      <div>
+        <p className="eyebrow">Audit</p>
+        <h3>{title}</h3>
+        <p className="muted">Tenant-scoped administrative activity for review and support diagnostics.</p>
+      </div>
+      <span className="audit-count-pill">{rows.length} rows</span>
+    </div>
+    {rows.length === 0 ? <div className="system-empty-state"><strong>No audit entries yet</strong><p>Activity will appear here after tenant actions are recorded.</p></div> : <div className="table-wrap audit-table-wrap"><table><thead><tr>{keys.map((k) => <th key={k}>{prettifyKeyLabel(k)}</th>)}</tr></thead><tbody>{rows.map((r, i) => { const obj = r as Record<string, unknown>; return <tr key={i}>{keys.map((k) => <td key={k}>{typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : String(obj[k] ?? '')}</td>)}</tr>; })}</tbody></table></div>}
+  </section>;
 }

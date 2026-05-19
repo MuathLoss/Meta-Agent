@@ -433,6 +433,8 @@ function Overview({ tenant, token, tenantSlug, readiness, analytics, previewText
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [logoMessage, setLogoMessage] = useState<string | null>(null);
   const logoUrl = resolveAssetUrl(tenant?.brand.logo_url);
+  const metricEntries = analytics ? Object.entries(analytics).filter(([, value]) => typeof value === 'number') as Array<[string, number]> : [];
+  const conversationStates = analytics?.conversation_states ? Object.entries(analytics.conversation_states) : [];
 
   async function uploadLogo(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -479,8 +481,29 @@ function Overview({ tenant, token, tenantSlug, readiness, analytics, previewText
     <section className="grid cards">
       <div className="card"><p className="eyebrow">Readiness</p><h3>{readiness?.is_ready ? 'Ready to publish' : 'Needs setup'}</h3><div className="checklist">{readiness?.items.map((i) => <div key={i.key} className={i.passed ? 'pass' : 'fail'}><span>{i.passed ? '✓' : '•'}</span>{i.label}</div>)}</div><button onClick={publish}>Publish workspace</button></div>
       <div className="card metrics-card">
-        <p className="eyebrow">Metrics</p>
-        <div className="metric-grid">{analytics && Object.entries(analytics).filter(([, v]) => typeof v === 'number').map(([k, v]) => <div className="metric" key={k}><strong>{v as number}</strong><span>{k}</span></div>)}</div>
+        <div className="analytics-head">
+          <div>
+            <p className="eyebrow">Analytics</p>
+            <h3>Tenant operations snapshot</h3>
+            <p className="muted">Live counts from the loaded tenant analytics endpoint.</p>
+          </div>
+          {analytics && <span className="analytics-freshness-pill">Loaded</span>}
+        </div>
+        {metricEntries.length > 0 ? <div className="metric-grid analytics-metric-grid">
+          {metricEntries.map(([key, value]) => <div className={`metric analytics-metric metric-${key.replace(/_/g, '-')}`} key={key}>
+            <span>{prettifyKeyLabel(key)}</span>
+            <strong>{value}</strong>
+          </div>)}
+        </div> : <div className="analytics-empty-state"><strong>No analytics loaded</strong><p>Tenant metrics will appear here after the analytics endpoint returns data.</p></div>}
+        {conversationStates.length > 0 && <div className="analytics-breakdown">
+          <div className="analytics-breakdown-head">
+            <strong>Conversation states</strong>
+            <span>{conversationStates.length} states</span>
+          </div>
+          <div className="analytics-state-grid">
+            {conversationStates.map(([state, count]) => <div key={state}><small>{prettifyKeyLabel(state)}</small><span>{count}</span></div>)}
+          </div>
+        </div>}
         <div className="logo-upload-panel">
           <div className="logo-upload-preview">
             <div className="brand-mark overview-brand-mark">

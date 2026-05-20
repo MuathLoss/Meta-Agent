@@ -12,3 +12,20 @@ class ChannelConfigResponse(BaseModel):
     provider_channel_id: str | None = None
     provider_account_id: str | None = None
     has_credentials: bool
+
+
+class ChannelTestConsoleRequest(BaseModel):
+    channel_type: str
+    session_id: str | None = Field(default=None, max_length=80)
+    message: str = Field(min_length=1, max_length=4000)
+
+
+class ChannelTestConsoleResponse(BaseModel):
+    session_id: str
+    channel_type: str
+    conversation_id: str | None = None
+    reply: str | None = None
+    state: str | None = None
+    handoff: bool
+    intent: str | None = None
+    notes: list[str] = Field(default_factory=list)

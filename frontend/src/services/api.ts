@@ -58,6 +58,16 @@ export type Channel = {
   provider_account_id?: string | null;
   has_credentials: boolean;
 };
+export type ChannelTestConsoleResult = {
+  session_id: string;
+  channel_type: string;
+  conversation_id?: string | null;
+  reply?: string | null;
+  state?: string | null;
+  handoff: boolean;
+  intent?: string | null;
+  notes: string[];
+};
 export type InboxItem = { id: number; customer_id: number; customer_phone: string; customer_name?: string | null; state: string; channel_type: string; owner_type?: string | null; owner_ref?: string | null; last_intent?: string | null; metadata_json?: Record<string, unknown>; last_message?: string | null; updated_at?: string | null };
 export type ConversationDetail = { conversation: { id: number; state: string; channel_type: string; owner_type?: string | null; owner_ref?: string | null; last_intent?: string | null; metadata_json?: Record<string, unknown> }; customer: { id: number; phone: string; name?: string | null; email?: string | null; tags_json: string[]; opt_in: boolean }; messages: Array<{ id: number; direction: string; text?: string | null; intent_code?: string | null; created_at?: string | null }> };
 export type ConversationReplyResult = { status: string; conversation_id: number; message_id: number; send_status?: string | null };
@@ -187,6 +197,7 @@ export const api = {
   saveRoutingRule: (token: string, tenantSlug: string, intentCode: string, payload: Omit<RoutingRule, 'id'>) => request(`/routing-rules/${intentCode}`, { method: 'PUT', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   channels: (token: string, tenantSlug: string) => request<Channel[]>('/channels', auth(token, tenantSlug)),
   saveChannel: (token: string, tenantSlug: string, channel: string, payload: { status: string; public_config: Record<string, unknown>; credentials?: Record<string, unknown> | null }) => request<Channel>(`/channels/${channel}/settings`, { method: 'PUT', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
+  testChannel: (token: string, tenantSlug: string, payload: { channel_type: string; session_id?: string | null; message: string }) => request<ChannelTestConsoleResult>('/channels/test-console/message', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   trainingExamples: (token: string, tenantSlug: string) => request<TrainingExample[]>('/training-examples', auth(token, tenantSlug)),
   createTrainingExample: (token: string, tenantSlug: string, payload: { raw_text: string; labeled_intent?: string | null }) => request('/training-examples', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   auditLogs: (token: string, tenantSlug: string) => request<AuditLog[]>('/audit-logs', auth(token, tenantSlug)),

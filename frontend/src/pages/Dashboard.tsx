@@ -8,6 +8,7 @@ import {
   type Broadcast,
   type BroadcastRecipient,
   type Channel,
+  type ChannelTestConsoleResult,
   type ConversationDetail,
   type Customer,
   type FaqItem,
@@ -2861,6 +2862,12 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
   const [smtpUseTls, setSmtpUseTls] = useState('true');
   const [smtpUseSsl, setSmtpUseSsl] = useState('false');
   const [emailInboundSecret, setEmailInboundSecret] = useState('');
+  const [imapHost, setImapHost] = useState('');
+  const [imapPort, setImapPort] = useState('');
+  const [imapUsername, setImapUsername] = useState('');
+  const [imapPassword, setImapPassword] = useState('');
+  const [imapMailbox, setImapMailbox] = useState('');
+  const [imapUseSsl, setImapUseSsl] = useState('true');
   const [metaPageAccessToken, setMetaPageAccessToken] = useState('');
   const [metaAppSecret, setMetaAppSecret] = useState('');
   const [metaVerifyToken, setMetaVerifyToken] = useState('');
@@ -2870,6 +2877,16 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
   const [metaGraphApiVersion, setMetaGraphApiVersion] = useState('');
   const [savingChannel, setSavingChannel] = useState(false);
   const [channelMessage, setChannelMessage] = useState<string | null>(null);
+  const [testConsoleOpen, setTestConsoleOpen] = useState(false);
+  const [testChannel, setTestChannel] = useState('web_chat');
+  const [testSessionId, setTestSessionId] = useState<string | null>(null);
+  const [testInput, setTestInput] = useState('');
+  const [testMessages, setTestMessages] = useState<Array<{ id: string; role: 'customer' | 'agent' | 'system'; text: string }>>([]);
+  const [testResult, setTestResult] = useState<ChannelTestConsoleResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const [testingChannel, setTestingChannel] = useState(false);
+  const testInputRef = useRef<HTMLInputElement | null>(null);
+  const testInboxRef = useRef<HTMLDivElement | null>(null);
 
   const configuredCount = rows.filter((row) => ['connected', 'configured', 'active'].includes(row.status)).length;
   const credentialCount = rows.filter((row) => row.has_credentials).length;
@@ -2877,6 +2894,48 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
   const selectedChannelRow = rows.find((row) => row.channel_type === channel);
   const selectedIsFutureAdapter = futureAdapters.has(channel);
   const controlsLocked = selectedIsFutureAdapter;
+
+  const testableChannels = channelOptions.map((channelType) => {
+    const row = rows.find((item) => item.channel_type === channelType);
+    const implemented = !futureAdapters.has(channelType);
+    const enabledFlag = row?.public_config?.enabled === true;
+    const statusReady = row ? ['configured', 'connected', 'active'].includes(row.status) : false;
+    let reason = '';
+    if (!implemented) reason = 'Adapter not implemented';
+    else if (!row) reason = 'Not configured for this tenant';
+    else if (!enabledFlag) reason = 'Disabled for this tenant';
+    else if (!statusReady) reason = `Status: ${row.status}`;
+    return { channelType, row, available: implemented && Boolean(row) && enabledFlag && statusReady, reason };
+  });
+
+  useEffect(() => {
+    const firstAvailable = testableChannels.find((item) => item.available)?.channelType || 'web_chat';
+    if (!testableChannels.some((item) => item.channelType === testChannel && item.available)) {
+      setTestChannel(firstAvailable);
+    }
+  }, [rows, testChannel]);
+
+  useEffect(() => {
+    if (!testConsoleOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.setTimeout(() => testInputRef.current?.focus(), 80);
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setTestConsoleOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [testConsoleOpen]);
+
+  useEffect(() => {
+    if (!testConsoleOpen) return;
+    const node = testInboxRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+    if (!testingChannel) testInputRef.current?.focus();
+  }, [testMessages, testingChannel, testConsoleOpen]);
 
   useEffect(() => {
     const current = rows.find((row) => row.channel_type === channel);
@@ -2898,6 +2957,12 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setSmtpUseTls('true');
       setSmtpUseSsl('false');
       setEmailInboundSecret('');
+      setImapHost('');
+      setImapPort('');
+      setImapUsername('');
+      setImapPassword('');
+      setImapMailbox('');
+      setImapUseSsl('true');
       setMetaPageAccessToken('');
       setMetaAppSecret('');
       setMetaVerifyToken('');
@@ -2924,6 +2989,12 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setSmtpUseTls('true');
       setSmtpUseSsl('false');
       setEmailInboundSecret('');
+      setImapHost('');
+      setImapPort('');
+      setImapUsername('');
+      setImapPassword('');
+      setImapMailbox('');
+      setImapUseSsl('true');
       setMetaPageAccessToken('');
       setMetaAppSecret('');
       setMetaVerifyToken('');
@@ -2950,6 +3021,12 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setSmtpUseTls('true');
       setSmtpUseSsl('false');
       setEmailInboundSecret('');
+      setImapHost('');
+      setImapPort('');
+      setImapUsername('');
+      setImapPassword('');
+      setImapMailbox('');
+      setImapUseSsl('true');
       setMetaPageAccessToken('');
       setMetaAppSecret('');
       setMetaVerifyToken('');
@@ -2975,6 +3052,12 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     setSmtpUseTls('true');
     setSmtpUseSsl('false');
     setEmailInboundSecret('');
+    setImapHost('');
+    setImapPort('');
+    setImapUsername('');
+    setImapPassword('');
+    setImapMailbox('');
+    setImapUseSsl('true');
     setMetaPageAccessToken('');
     setMetaAppSecret('');
     setMetaVerifyToken('');
@@ -3010,7 +3093,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     }
 
     if (channel === 'email') {
-      const hasEmailCredentialUpdate = [smtpHost, smtpPort, smtpUsername, smtpPassword, smtpFromEmail, smtpFromName, emailInboundSecret].some((value) => value.trim());
+      const hasEmailCredentialUpdate = [smtpHost, smtpPort, smtpUsername, smtpPassword, smtpFromEmail, smtpFromName, emailInboundSecret, imapHost, imapPort, imapUsername, imapPassword, imapMailbox].some((value) => value.trim());
       if (hasEmailCredentialUpdate) {
         if (smtpHost.trim()) credentials.smtp_host = smtpHost.trim();
         if (smtpPort.trim()) credentials.smtp_port = smtpPort.trim();
@@ -3019,8 +3102,14 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         if (smtpFromEmail.trim()) credentials.smtp_from_email = smtpFromEmail.trim();
         if (smtpFromName.trim()) credentials.smtp_from_name = smtpFromName.trim();
         if (emailInboundSecret.trim()) credentials.inbound_webhook_secret = emailInboundSecret.trim();
+        if (imapHost.trim()) credentials.imap_host = imapHost.trim();
+        if (imapPort.trim()) credentials.imap_port = imapPort.trim();
+        if (imapUsername.trim()) credentials.imap_username = imapUsername.trim();
+        if (imapPassword.trim()) credentials.imap_password = imapPassword.trim();
+        if (imapMailbox.trim()) credentials.imap_mailbox = imapMailbox.trim();
         credentials.use_tls = smtpUseTls === 'true';
         credentials.use_ssl = smtpUseSsl === 'true';
+        credentials.imap_use_ssl = imapUseSsl === 'true';
       }
     }
 
@@ -3131,8 +3220,8 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     }
 
     if (row.channel_type === 'email') {
-      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'SMTP email channel ready';
-      if (enabledFlag && row.has_credentials && readyStatus) return 'Configurable email channel';
+      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'Production-connectable email channel';
+      if (enabledFlag && row.has_credentials && readyStatus) return 'SMTP and IMAP credentials stored';
       return enabledFlag ? 'Email setup pending' : 'Disabled for tenant';
     }
 
@@ -3149,7 +3238,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     if (row.channel_type === 'telegram') return 'Telegram can be used for local/free demo testing.';
     if (row.channel_type === 'whatsapp') return 'WhatsApp requires official Meta credentials before production live send.';
     if (row.channel_type === 'web_chat') return 'First-party demo channel for tenant website testing. No external provider credentials required.';
-    if (row.channel_type === 'email') return 'SMTP outbound plus provider-neutral inbound testing. Production inbox sync can be added later.';
+    if (row.channel_type === 'email') return 'SMTP outbound plus IMAP polling for production-capable inbound email.';
     if (row.channel_type === 'instagram') return 'Meta social messaging channel. Live use may require Meta permissions, webhook setup, and app review.';
     if (row.channel_type === 'facebook') return 'Meta social messaging channel. Live use may require Meta permissions, webhook setup, and app review.';
     return 'Planned adapter. Credential setup is not available on this screen yet.';
@@ -3157,7 +3246,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
 
   function channelBadgeClass(row: Channel) {
     const headline = channelHeadline(row);
-    if (headline.includes('ready') || headline.includes('Working') || headline === 'Meta credentials stored' || headline === 'Available for testing' || headline === 'Configurable email channel') return 'connected';
+    if (headline.includes('ready') || headline.includes('Working') || headline === 'Meta credentials stored' || headline === 'Available for testing' || headline === 'Production-connectable email channel') return 'connected';
     if (headline === 'Future adapter') return 'future';
     if (row.public_config?.enabled === false) return 'disabled';
     return 'pending';
@@ -3210,8 +3299,9 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         { label: 'SMTP credentials', value: row.has_credentials ? 'Stored securely' : 'Missing SMTP credentials' },
         { label: 'Outbound send', value: liveFlag && row.has_credentials ? 'Ready when SMTP accepts mail' : 'Stored only until SMTP is ready' },
         { label: 'Inbound test endpoint', value: `/channels/email/${tenantSlug}/inbound-test` },
+        { label: 'IMAP poll endpoint', value: `/channels/email/${tenantSlug}/poll-once` },
         { label: 'Inbound secret', value: row.has_credentials ? 'Optional secret may be stored' : 'Optional for local testing' },
-        { label: 'Production inbox sync', value: 'Provider webhook / IMAP later' },
+        { label: 'Production inbound', value: row.has_credentials ? 'IMAP polling credentials can be stored' : 'Requires IMAP credentials' },
       ];
     }
 
@@ -3222,6 +3312,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         { label: 'Meta credentials', value: row.has_credentials ? 'Stored securely' : 'Missing Meta credentials' },
         { label: accountLabel, value: row.has_credentials ? 'Stored securely if provided' : 'Required before live testing' },
         { label: 'Inbound test endpoint', value: `/channels/${row.channel_type}/${tenantSlug}/inbound-test` },
+        { label: 'Real webhook endpoint', value: `/channels/${row.channel_type}/webhook` },
         { label: 'Provider sender identity', value: 'Stored from inbound test sender ID' },
         { label: 'Live send', value: liveFlag && row.has_credentials ? 'On after Meta setup' : 'Stored only until credentials are ready' },
         { label: 'Meta permissions', value: 'May require webhook setup and app review' },
@@ -3236,6 +3327,49 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     ];
   }
 
+  function resetTestConsole() {
+    setTestSessionId(null);
+    setTestMessages([]);
+    setTestResult(null);
+    setTestError(null);
+    setTestInput('');
+  }
+
+  async function sendTestMessage(messageText: string) {
+    const message = messageText.trim();
+    if (!message || testingChannel) return;
+    const localId = `${Date.now()}`;
+    setTestingChannel(true);
+    setTestError(null);
+    setTestInput('');
+    setTestMessages((items) => [...items, { id: `customer-${localId}`, role: 'customer', text: message }]);
+    try {
+      const result = await api.testChannel(token, tenantSlug, { channel_type: testChannel, session_id: testSessionId, message });
+      setTestResult(result);
+      setTestSessionId(result.session_id);
+      setTestMessages((items) => [
+        ...items,
+        {
+          id: `agent-${localId}`,
+          role: result.reply ? 'agent' : 'system',
+          text: result.reply || (result.handoff ? 'No auto-reply. Conversation moved to human handoff.' : 'No auto-reply returned.'),
+        },
+      ]);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Channel test failed';
+      setTestError(text);
+      setTestMessages((items) => [...items, { id: `system-${localId}`, role: 'system', text }]);
+    } finally {
+      setTestingChannel(false);
+      window.setTimeout(() => testInputRef.current?.focus(), 0);
+    }
+  }
+
+  async function submitTestMessage(e: FormEvent) {
+    e.preventDefault();
+    await sendTestMessage(testInput);
+  }
+
   return <section className="channels-shell">
     <div className="channels-hero">
       <div>
@@ -3243,10 +3377,13 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         <h2>Tenant communication channels</h2>
         <p className="muted">Manage channel availability, live-send posture, and encrypted provider credentials without exposing raw secret values.</p>
       </div>
-      <div className="channels-summary-grid" aria-label="Channel settings summary">
-        <div><span>Configured</span><strong>{configuredCount}</strong></div>
-        <div><span>Credentials</span><strong>{credentialCount}</strong></div>
-        <div><span>Live send</span><strong>{liveChannelCount}</strong></div>
+      <div className="channels-hero-side">
+        <div className="channels-summary-grid" aria-label="Channel settings summary">
+          <div><span>Configured</span><strong>{configuredCount}</strong></div>
+          <div><span>Credentials</span><strong>{credentialCount}</strong></div>
+          <div><span>Live send</span><strong>{liveChannelCount}</strong></div>
+        </div>
+        <button className="channel-test-launch" type="button" onClick={() => setTestConsoleOpen(true)}>Test channel</button>
       </div>
     </div>
 
@@ -3348,6 +3485,30 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
             <span className="field-helper">Optional for provider-neutral inbound testing. Stored encrypted if entered.</span>
             <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Optional test secret'} value={emailInboundSecret} onChange={(e) => setEmailInboundSecret(e.target.value)} autoComplete="new-password" />
           </label>
+          <label>IMAP host
+            <span className="field-helper">Used by the protected poll-once endpoint for production inbound email.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'imap.example.com'} value={imapHost} onChange={(e) => setImapHost(e.target.value)} autoComplete="off" />
+          </label>
+          <label>IMAP port
+            <span className="field-helper">Usually 993 for SSL.</span>
+            <input inputMode="numeric" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : '993'} value={imapPort} onChange={(e) => setImapPort(e.target.value)} autoComplete="off" />
+          </label>
+          <label>IMAP username
+            <span className="field-helper">Encrypted after save and never shown back in the UI.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'IMAP username'} value={imapUsername} onChange={(e) => setImapUsername(e.target.value)} autoComplete="off" />
+          </label>
+          <label>IMAP password
+            <span className="field-helper">Encrypted after save. The current password is never displayed.</span>
+            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'IMAP password'} value={imapPassword} onChange={(e) => setImapPassword(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label>IMAP mailbox
+            <span className="field-helper">Defaults to INBOX when omitted.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'INBOX'} value={imapMailbox} onChange={(e) => setImapMailbox(e.target.value)} autoComplete="off" />
+          </label>
+          <label>IMAP SSL
+            <span className="field-helper">Usually true for port 993.</span>
+            <select value={imapUseSsl} onChange={(e) => setImapUseSsl(e.target.value)}><option value="true">true</option><option value="false">false</option></select>
+          </label>
         </div>}
         {(channel === 'instagram' || channel === 'facebook') && <div className="channel-secret-grid">
           <label>Page access token
@@ -3382,7 +3543,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         {channel === 'telegram' && <div className="channel-help-note neutral"><strong>Testing channel</strong><p>Telegram can be used for local/free demo testing. A provider routing ID is not required unless a specific routing method is added later.</p></div>}
         {channel === 'whatsapp' && <div className="channel-help-note"><strong>Production channel</strong><p>WhatsApp requires official Meta credentials before production live send. Saved values stay hidden and tenant-scoped.</p></div>}
         {channel === 'web_chat' && <div className="channel-help-note neutral"><strong>First-party demo channel</strong><p>Use <code>/channels/web-chat/{tenantSlug}/message</code> with the tenant slug and a visitor ID. A full embeddable widget can be added later.</p></div>}
-        {channel === 'email' && <div className="channel-help-note neutral"><strong>SMTP email channel</strong><p>Use <code>/channels/email/{tenantSlug}/inbound-test</code> for provider-neutral inbound testing. Real inbox sync or provider webhooks can be added later.</p></div>}
+        {channel === 'email' && <div className="channel-help-note neutral"><strong>Production-connectable email channel</strong><p>Use SMTP for outbound and the protected <code>/channels/email/{tenantSlug}/poll-once</code> endpoint for IMAP inbound polling. The inbound-test route remains available for local testing.</p></div>}
         {(channel === 'instagram' || channel === 'facebook') && <div className="channel-help-note neutral"><strong>Credential-ready Meta channel</strong><p>Use <code>/channels/{channel}/{tenantSlug}/inbound-test</code> for provider-neutral testing. Live use may require Meta permissions, webhook setup, and app review.</p></div>}
         {selectedIsFutureAdapter && <div className="channel-help-note neutral"><strong>Adapter not implemented yet</strong><p>This channel is represented in the platform roadmap, but live enablement is locked until a backend adapter exists.</p></div>}
         {channelMessage && <p className="settings-status success">{channelMessage}</p>}
@@ -3421,6 +3582,70 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         </div>
       </div>
     </div>
+    {testConsoleOpen && typeof document !== 'undefined' && createPortal(
+      <div className="channel-test-overlay" role="dialog" aria-modal="true" aria-labelledby="channel-test-title" onMouseDown={(event) => {
+        if (event.target === event.currentTarget) setTestConsoleOpen(false);
+      }}>
+        <div className="channel-test-window">
+          <div className="channel-test-titlebar">
+            <div>
+              <h3 id="channel-test-title">Channel Test Console</h3>
+              <p>Dry-run inbox for tenant-scoped agent replies.</p>
+            </div>
+            <button className="secondary" type="button" onClick={() => setTestConsoleOpen(false)}>Close</button>
+          </div>
+          <div className="channel-test-body">
+            <aside className="channel-test-sidebar">
+              <div>
+                <p className="eyebrow">Select channel</p>
+                <p className="muted">Only enabled, implemented tenant channels are available for dry-run testing.</p>
+              </div>
+              <div className="channel-test-picker">
+                {testableChannels.map((item) => <button
+                  type="button"
+                  key={item.channelType}
+                  disabled={!item.available || testingChannel}
+                  className={testChannel === item.channelType ? 'active' : ''}
+                  onClick={() => {
+                    setTestChannel(item.channelType);
+                    resetTestConsole();
+                  }}
+                >
+                  <span>{channelLabel(item.channelType)}</span>
+                  <small>{item.available ? channelHeadline(item.row as Channel) : item.reason}</small>
+                </button>)}
+              </div>
+              <button className="secondary" type="button" onClick={resetTestConsole} disabled={testingChannel}>Reset session</button>
+            </aside>
+            <div className="channel-test-inbox">
+              <div className="channel-test-status">
+                <div><span>Channel</span><strong>{channelLabel(testChannel)}</strong></div>
+                <div><span>State</span><strong>{testResult?.state || 'Ready'}</strong></div>
+                <div><span>Handoff</span><strong>{testResult ? (testResult.handoff ? 'Yes' : 'No') : 'No'}</strong></div>
+                <div><span>Last status</span><strong>{testError ? 'Rejected' : testingChannel ? 'Testing' : testResult ? 'Dry-run stored' : 'Idle'}</strong></div>
+              </div>
+              <div className="virtual-inbox" aria-live="polite" ref={testInboxRef}>
+                {testMessages.length === 0 ? <div className="channel-test-empty">
+                  <strong>Start a virtual customer chat</strong>
+                  <p>Messages are stored with a synthetic test identity and outbound provider APIs are bypassed.</p>
+                </div> : testMessages.map((item) => <div className={`test-bubble ${item.role}`} key={item.id}>
+                  <span>{item.role === 'customer' ? 'Customer' : item.role === 'agent' ? 'Agent' : 'System'}</span>
+                  <p>{item.text}</p>
+                  {item.role === 'system' && testResult?.handoff && item.text.includes('human handoff') && <button className="return-to-bot-button" type="button" onClick={() => void sendTestMessage('bot')} disabled={testingChannel}>Return to bot</button>}
+                </div>)}
+              </div>
+              {testError && <p className="settings-status error">{testError}</p>}
+              <form className="channel-test-compose" onSubmit={submitTestMessage}>
+                <input ref={testInputRef} value={testInput} onChange={(event) => setTestInput(event.target.value)} placeholder="Type a fake customer message..." disabled={testingChannel} />
+                <button type="submit" disabled={testingChannel || !testInput.trim()}>{testingChannel ? 'Testing...' : 'Send test'}</button>
+              </form>
+              <p className="channel-test-footnote">Session: {testSessionId || 'new'} · Source: channel_test_console · No secrets or raw provider payloads shown.</p>
+            </div>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
   </section>;
 }
 

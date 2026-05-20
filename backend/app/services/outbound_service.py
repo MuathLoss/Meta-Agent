@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.redaction import redact_sensitive
 from app.models.entities import ChannelConfig, Message
+from app.services.dry_run_context import dry_run_outbound_enabled
 from app.services.email_adapter import EmailAdapter
 from app.services.meta_social_adapter import MetaSocialAdapter
 from app.services.tenant_channel_service import TenantChannelService
@@ -259,6 +260,21 @@ class OutboundService:
         return row
 
     def send_or_store(self, db: Session, *, tenant_id: int, conversation_id: int, channel_type: str, destination: str, text: str, intent_code: str | None) -> Message:
+        if dry_run_outbound_enabled():
+            return self.store_local_outbound(
+                db,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                text=text,
+                intent_code=intent_code,
+                payload_json={
+                    "send_status": "dry_run",
+                    "provider": channel_type,
+                    "channel_type": channel_type,
+                    "delivery": "channel_test_console",
+                },
+            )
+
         channel = db.query(ChannelConfig).filter(ChannelConfig.tenant_id == tenant_id, ChannelConfig.channel_type == channel_type).first()
         if not channel:
             return self.store_local_outbound(db, tenant_id=tenant_id, conversation_id=conversation_id, text=text, intent_code=intent_code, payload_json={"send_status": "no_adapter", "provider": channel_type, "channel_type": channel_type})

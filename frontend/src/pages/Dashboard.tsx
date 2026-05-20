@@ -3137,9 +3137,9 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     }
 
     if (row.channel_type === 'instagram' || row.channel_type === 'facebook') {
-      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'Credential-ready skeleton';
-      if (enabledFlag && row.has_credentials && readyStatus) return 'Meta setup stored';
-      return enabledFlag ? 'Meta setup pending' : 'Disabled for tenant';
+      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'Ready for testing after Meta setup';
+      if (enabledFlag && row.has_credentials && readyStatus) return 'Credential-ready Meta channel';
+      return enabledFlag ? 'Requires Meta app/page credentials' : 'Disabled for tenant';
     }
 
     return 'Future adapter';
@@ -3150,8 +3150,8 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     if (row.channel_type === 'whatsapp') return 'WhatsApp requires official Meta credentials before production live send.';
     if (row.channel_type === 'web_chat') return 'First-party demo channel for tenant website testing. No external provider credentials required.';
     if (row.channel_type === 'email') return 'SMTP outbound plus provider-neutral inbound testing. Production inbox sync can be added later.';
-    if (row.channel_type === 'instagram') return 'Meta social messaging channel. Real testing requires Instagram business permissions and app review.';
-    if (row.channel_type === 'facebook') return 'Meta social messaging channel. Real testing requires page permissions and app review.';
+    if (row.channel_type === 'instagram') return 'Meta social messaging channel. Live use may require Meta permissions, webhook setup, and app review.';
+    if (row.channel_type === 'facebook') return 'Meta social messaging channel. Live use may require Meta permissions, webhook setup, and app review.';
     return 'Planned adapter. Credential setup is not available on this screen yet.';
   }
 
@@ -3224,7 +3224,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         { label: 'Inbound test endpoint', value: `/channels/${row.channel_type}/${tenantSlug}/inbound-test` },
         { label: 'Provider sender identity', value: 'Stored from inbound test sender ID' },
         { label: 'Live send', value: liveFlag && row.has_credentials ? 'On after Meta setup' : 'Stored only until credentials are ready' },
-        { label: 'Meta app review', value: 'Required for real production messaging' },
+        { label: 'Meta permissions', value: 'May require webhook setup and app review' },
       ];
     }
 
@@ -3383,7 +3383,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         {channel === 'whatsapp' && <div className="channel-help-note"><strong>Production channel</strong><p>WhatsApp requires official Meta credentials before production live send. Saved values stay hidden and tenant-scoped.</p></div>}
         {channel === 'web_chat' && <div className="channel-help-note neutral"><strong>First-party demo channel</strong><p>Use <code>/channels/web-chat/{tenantSlug}/message</code> with the tenant slug and a visitor ID. A full embeddable widget can be added later.</p></div>}
         {channel === 'email' && <div className="channel-help-note neutral"><strong>SMTP email channel</strong><p>Use <code>/channels/email/{tenantSlug}/inbound-test</code> for provider-neutral inbound testing. Real inbox sync or provider webhooks can be added later.</p></div>}
-        {(channel === 'instagram' || channel === 'facebook') && <div className="channel-help-note neutral"><strong>Meta social messaging channel</strong><p>Use <code>/channels/{channel}/{tenantSlug}/inbound-test</code> for provider-neutral testing. Real Meta testing requires app/page permissions and may require app review.</p></div>}
+        {(channel === 'instagram' || channel === 'facebook') && <div className="channel-help-note neutral"><strong>Credential-ready Meta channel</strong><p>Use <code>/channels/{channel}/{tenantSlug}/inbound-test</code> for provider-neutral testing. Live use may require Meta permissions, webhook setup, and app review.</p></div>}
         {selectedIsFutureAdapter && <div className="channel-help-note neutral"><strong>Adapter not implemented yet</strong><p>This channel is represented in the platform roadmap, but live enablement is locked until a backend adapter exists.</p></div>}
         {channelMessage && <p className="settings-status success">{channelMessage}</p>}
         <div className="channel-form-actions">

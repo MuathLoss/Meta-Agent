@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,11 +10,31 @@ from sqlalchemy import text
 from app.api import routes_auth, routes_onboarding, routes_channels, routes_dashboard, routes_broadcasts, routes_webhook, routes_config, routes_operations, routes_runtime, routes_uat, routes_deployment, routes_acceptance
 from app.core.config import settings
 from app.core.db import SessionLocal
+from app.services.email_polling_scheduler import EmailPollingBackgroundTask
 
 logger = logging.getLogger(__name__)
 settings.validate_startup()
+email_polling_task: EmailPollingBackgroundTask | None = None
 
-app = FastAPI(title="Configurable Multi-Tenant Business Agent Platform", version="0.7.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global email_polling_task
+    if settings.email_polling_enabled:
+        email_polling_task = EmailPollingBackgroundTask()
+        email_polling_task.start()
+        logger.info("email polling background task started", extra={"interval_seconds": settings.email_poll_interval_seconds})
+    else:
+        logger.info("email polling background task disabled")
+    try:
+        yield
+    finally:
+        if email_polling_task:
+            await email_polling_task.stop()
+            logger.info("email polling background task stopped")
+
+
+app = FastAPI(title="Configurable Multi-Tenant Business Agent Platform", version="0.7.0", lifespan=lifespan)
 uploads_dir = Path(__file__).resolve().parent / "uploads"
 uploads_dir.mkdir(parents=True, exist_ok=True)
 

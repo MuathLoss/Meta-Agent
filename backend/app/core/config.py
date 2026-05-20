@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     tenant_channel_secret_key: str
     allow_unsigned_webhooks_in_dev: bool = True
+    email_polling_enabled: bool = False
+    email_poll_interval_seconds: int = 60
     ollama_enabled: bool = False
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "gemma4:e4b"

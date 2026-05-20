@@ -2843,6 +2843,7 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
 
 function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {
   const channelOptions = ['whatsapp', 'telegram', 'email', 'instagram', 'facebook', 'web_chat'];
+  const futureAdapters = new Set(['email', 'instagram', 'facebook', 'web_chat']);
   const [channel, setChannel] = useState('whatsapp');
   const [status, setStatus] = useState('configured');
   const [enabled, setEnabled] = useState('true');
@@ -2859,6 +2860,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
   const credentialCount = rows.filter((row) => row.has_credentials).length;
   const liveChannelCount = rows.filter((row) => row.public_config?.live_send_enabled === true).length;
   const selectedChannelRow = rows.find((row) => row.channel_type === channel);
+  const selectedIsFutureAdapter = futureAdapters.has(channel);
 
   useEffect(() => {
     const current = rows.find((row) => row.channel_type === channel);
@@ -2867,7 +2869,11 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setStatus(current.status || 'configured');
       setEnabled(publicConfig.enabled === false ? 'false' : 'true');
       setLiveSendEnabled(publicConfig.live_send_enabled === true ? 'true' : 'false');
-      setPhoneNumberId(String(publicConfig.phone_number_id || ''));
+      setPhoneNumberId('');
+      setAccessToken('');
+      setVerifyToken('');
+      setAppSecret('');
+      setBotToken('');
       return;
     }
     if (channel === 'telegram') {
@@ -2875,6 +2881,10 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setEnabled('true');
       setLiveSendEnabled('false');
       setPhoneNumberId('');
+      setAccessToken('');
+      setVerifyToken('');
+      setAppSecret('');
+      setBotToken('');
       return;
     }
     if (channel === 'whatsapp') {
@@ -2882,12 +2892,20 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setEnabled('true');
       setLiveSendEnabled('false');
       setPhoneNumberId('');
+      setAccessToken('');
+      setVerifyToken('');
+      setAppSecret('');
+      setBotToken('');
       return;
     }
     setStatus('future');
     setEnabled('false');
     setLiveSendEnabled('false');
     setPhoneNumberId('');
+    setAccessToken('');
+    setVerifyToken('');
+    setAppSecret('');
+    setBotToken('');
   }, [channel, rows]);
 
   async function submit(e: FormEvent) {
@@ -2895,6 +2913,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     setSavingChannel(true);
     setChannelMessage(null);
     const publicConfig: Record<string, unknown> = {
+      ...(selectedChannelRow?.public_config || {}),
       enabled: enabled === 'true',
       live_send_enabled: liveSendEnabled === 'true',
     };
@@ -2923,6 +2942,87 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     }
   }
 
+  function hasSafeConfigValue(row: Channel, key: string) {
+    const value = row.public_config?.[key];
+    return typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
+  }
+
+  function hiddenConfigured(value: boolean, missing = 'Not configured') {
+    return value ? 'Configured, hidden' : missing;
+  }
+
+  function channelHeadline(row: Channel) {
+    const enabledFlag = row.public_config?.enabled === true;
+    const liveFlag = row.public_config?.live_send_enabled === true;
+    const readyStatus = ['connected', 'configured', 'active'].includes(row.status);
+
+    if (row.channel_type === 'telegram') {
+      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'Demo channel ready';
+      if (enabledFlag && row.has_credentials) return 'Working for testing';
+      return enabledFlag ? 'Telegram setup pending' : 'Disabled for tenant';
+    }
+
+    if (row.channel_type === 'whatsapp') {
+      const hasRoutingId = Boolean(row.provider_channel_id) || hasSafeConfigValue(row, 'phone_number_id');
+      if (enabledFlag && liveFlag && row.has_credentials && hasRoutingId && readyStatus) return 'Meta credentials stored';
+      return 'Production channel pending';
+    }
+
+    return 'Future adapter';
+  }
+
+  function channelDescription(row: Channel) {
+    if (row.channel_type === 'telegram') return 'Telegram can be used for local/free demo testing.';
+    if (row.channel_type === 'whatsapp') return 'WhatsApp requires official Meta credentials before production live send.';
+    return 'Planned adapter. Credential setup is not available on this screen yet.';
+  }
+
+  function channelBadgeClass(row: Channel) {
+    const headline = channelHeadline(row);
+    if (headline.includes('ready') || headline.includes('Working') || headline === 'Meta credentials stored') return 'connected';
+    if (headline === 'Future adapter') return 'future';
+    if (row.public_config?.enabled === false) return 'disabled';
+    return 'pending';
+  }
+
+  function setupItems(row: Channel) {
+    const enabledFlag = row.public_config?.enabled === true;
+    const liveFlag = row.public_config?.live_send_enabled === true;
+    const statusReady = ['connected', 'configured', 'active'].includes(row.status);
+    const hasRoutingId = Boolean(row.provider_channel_id) || hasSafeConfigValue(row, 'phone_number_id');
+    const hasWabaId = Boolean(row.provider_account_id) || hasSafeConfigValue(row, 'waba_id');
+
+    if (row.channel_type === 'telegram') {
+      return [
+        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Disabled' },
+        { label: 'Bot credentials', value: row.has_credentials ? 'Stored securely' : 'Missing bot token' },
+        { label: 'Provider routing ID', value: hasRoutingId ? 'Configured, hidden' : 'Not required for polling/demo routing' },
+        { label: 'Live send', value: liveFlag ? 'Enabled for testing' : 'Off' },
+      ];
+    }
+
+    if (row.channel_type === 'whatsapp') {
+      return [
+        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Disabled' },
+        { label: 'Phone number ID', value: hiddenConfigured(hasRoutingId) },
+        { label: 'Access token', value: row.has_credentials ? 'Credential bundle stored; not itemized by API' : 'Not stored' },
+        { label: 'Verify token', value: row.has_credentials ? 'Credential bundle stored; not itemized by API' : 'Not stored' },
+        { label: 'App secret', value: row.has_credentials ? 'Credential bundle stored; not itemized by API' : 'Not stored' },
+        { label: 'WABA ID', value: hiddenConfigured(hasWabaId, 'Optional / not reported') },
+        { label: 'Live send', value: liveFlag ? 'Enabled' : 'Off until Meta setup is ready' },
+        { label: 'Public HTTPS webhook URL', value: 'Required later' },
+        { label: 'Approved templates', value: 'Required later' },
+      ];
+    }
+
+    return [
+      { label: 'Runtime status', value: 'Planned' },
+      { label: 'Credentials', value: 'Not supported yet' },
+      { label: 'Provider routing', value: 'Future adapter' },
+      { label: 'Live send', value: 'Unavailable' },
+    ];
+  }
+
   return <section className="channels-shell">
     <div className="channels-hero">
       <div>
@@ -2945,7 +3045,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
             <h3>Tenant-scoped channel config</h3>
             <p className="muted">Update one channel at a time. Existing credential-like values are masked and should only be replaced when rotating configuration.</p>
           </div>
-          <span className={`channel-state-badge ${selectedChannelRow?.has_credentials ? 'connected' : status === 'future' ? 'future' : 'pending'}`}>{selectedChannelRow?.has_credentials ? 'Credentials saved' : status === 'future' ? 'Future channel' : 'Needs credentials'}</span>
+          <span className={`channel-state-badge ${selectedChannelRow ? channelBadgeClass(selectedChannelRow) : selectedIsFutureAdapter ? 'future' : 'pending'}`}>{selectedChannelRow ? channelHeadline(selectedChannelRow) : selectedIsFutureAdapter ? 'Future adapter' : 'Needs setup'}</span>
         </div>
         <div className="channel-form-grid">
           <label>Channel
@@ -2989,7 +3089,9 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
           <span className="field-helper">Encrypted after save. The current bot token is never displayed.</span>
           <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste bot token'} value={botToken} onChange={(e) => setBotToken(e.target.value)} autoComplete="off" />
         </label></div>}
-        {channel !== 'whatsapp' && channel !== 'telegram' && <div className="channel-help-note"><strong>Future channel</strong><p>This channel currently stores only safe status and enabled settings. Provider credentials are not required here yet.</p></div>}
+        {channel === 'telegram' && <div className="channel-help-note neutral"><strong>Testing channel</strong><p>Telegram can be used for local/free demo testing. A provider routing ID is not required unless a specific routing method is added later.</p></div>}
+        {channel === 'whatsapp' && <div className="channel-help-note"><strong>Production channel</strong><p>WhatsApp requires official Meta credentials before production live send. Saved values stay hidden and tenant-scoped.</p></div>}
+        {selectedIsFutureAdapter && <div className="channel-help-note neutral"><strong>Future adapter</strong><p>This adapter is planned. No credential form is shown because this screen only has backend support for safe status flags right now.</p></div>}
         {channelMessage && <p className="settings-status success">{channelMessage}</p>}
         <div className="channel-form-actions">
           <button disabled={savingChannel}>{savingChannel ? 'Saving...' : 'Save encrypted config'}</button>
@@ -3007,25 +3109,19 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         <div className="channel-table">
           {channelOptions.map((channelType) => {
             const row = rows.find((item) => item.channel_type === channelType) || { channel_type: channelType, status: channelType === 'whatsapp' ? 'configured' : channelType === 'telegram' ? 'not_connected' : 'future', public_config: {}, has_credentials: false };
-            const enabledFlag = row.public_config?.enabled === true;
-            const liveFlag = row.public_config?.live_send_enabled === true;
-            const fullyConnected = enabledFlag && row.has_credentials && liveFlag && ['connected', 'configured', 'active'].includes(row.status);
-            const statusClass = fullyConnected ? 'connected' : row.status === 'future' ? 'future' : enabledFlag ? 'pending' : 'disabled';
-            const providerIdConfigured = Boolean(row.public_config?.phone_number_id);
+            const statusClass = channelBadgeClass(row);
+            const headline = channelHeadline(row);
             return <div className="channel-status-card" key={row.channel_type}>
               <div className="channel-status-head">
-                <div className={`status-dot ${fullyConnected ? 'on' : 'off'}`} />
+                <div className={`status-dot ${statusClass === 'connected' ? 'on' : statusClass === 'future' ? 'idle' : 'off'}`} />
                 <div>
                   <strong>{row.channel_type.split('_').join(' ')}</strong>
-                  <p>{fullyConnected ? 'Ready for live messaging' : row.status === 'future' ? 'Planned channel' : enabledFlag ? 'Configuration pending' : 'Disabled for tenant'}</p>
+                  <p>{channelDescription(row)}</p>
                 </div>
-                <span className={`channel-state-badge ${statusClass}`}>{row.status}</span>
+                <span className={`channel-state-badge ${statusClass}`}>{headline}</span>
               </div>
               <div className="channel-status-grid">
-                <div><small>Enabled</small><span>{enabledFlag ? 'Enabled' : 'Disabled'}</span></div>
-                <div><small>Live send</small><span>{liveFlag ? 'Enabled' : 'Off'}</span></div>
-                <div><small>Credentials</small><span>{row.has_credentials ? 'Stored securely' : 'Not stored'}</span></div>
-                <div><small>Provider ID</small><span>{providerIdConfigured ? 'Configured, hidden' : 'Not configured'}</span></div>
+                {setupItems(row).map((item) => <div key={`${row.channel_type}-${item.label}`}><small>{item.label}</small><span>{item.value}</span></div>)}
               </div>
             </div>;
           })}

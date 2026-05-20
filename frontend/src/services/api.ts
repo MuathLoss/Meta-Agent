@@ -50,7 +50,14 @@ export type RoutingRule = {
   followup_question_ar?: string | null;
   followup_question_en?: string | null;
 };
-export type Channel = { channel_type: string; status: string; public_config: Record<string, unknown>; has_credentials: boolean };
+export type Channel = {
+  channel_type: string;
+  status: string;
+  public_config: Record<string, unknown>;
+  provider_channel_id?: string | null;
+  provider_account_id?: string | null;
+  has_credentials: boolean;
+};
 export type InboxItem = { id: number; customer_id: number; customer_phone: string; customer_name?: string | null; state: string; channel_type: string; owner_type?: string | null; owner_ref?: string | null; last_intent?: string | null; metadata_json?: Record<string, unknown>; last_message?: string | null; updated_at?: string | null };
 export type ConversationDetail = { conversation: { id: number; state: string; channel_type: string; owner_type?: string | null; owner_ref?: string | null; last_intent?: string | null; metadata_json?: Record<string, unknown> }; customer: { id: number; phone: string; name?: string | null; email?: string | null; tags_json: string[]; opt_in: boolean }; messages: Array<{ id: number; direction: string; text?: string | null; intent_code?: string | null; created_at?: string | null }> };
 export type ConversationReplyResult = { status: string; conversation_id: number; message_id: number; send_status?: string | null };

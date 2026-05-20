@@ -30,6 +30,7 @@ app.add_middleware(
         "X-Tenant-Slug",
         "X-Hub-Signature-256",
         "X-Requested-With",
+        "X-Channel-Webhook-Secret",
         "X-Telegram-Bot-Api-Secret-Token",
     ],
 )

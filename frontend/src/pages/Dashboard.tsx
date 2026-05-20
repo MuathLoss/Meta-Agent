@@ -2843,7 +2843,7 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
 
 function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {
   const channelOptions = ['whatsapp', 'telegram', 'email', 'instagram', 'facebook', 'web_chat'];
-  const futureAdapters = new Set(['email', 'instagram', 'facebook']);
+  const futureAdapters = new Set(['instagram', 'facebook']);
   const [channel, setChannel] = useState('whatsapp');
   const [enabled, setEnabled] = useState('true');
   const [liveSendEnabled, setLiveSendEnabled] = useState('false');
@@ -2852,6 +2852,15 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
   const [verifyToken, setVerifyToken] = useState('');
   const [appSecret, setAppSecret] = useState('');
   const [botToken, setBotToken] = useState('');
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState('');
+  const [smtpUsername, setSmtpUsername] = useState('');
+  const [smtpPassword, setSmtpPassword] = useState('');
+  const [smtpFromEmail, setSmtpFromEmail] = useState('');
+  const [smtpFromName, setSmtpFromName] = useState('');
+  const [smtpUseTls, setSmtpUseTls] = useState('true');
+  const [smtpUseSsl, setSmtpUseSsl] = useState('false');
+  const [emailInboundSecret, setEmailInboundSecret] = useState('');
   const [savingChannel, setSavingChannel] = useState(false);
   const [channelMessage, setChannelMessage] = useState<string | null>(null);
 
@@ -2873,6 +2882,15 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setVerifyToken('');
       setAppSecret('');
       setBotToken('');
+      setSmtpHost('');
+      setSmtpPort('');
+      setSmtpUsername('');
+      setSmtpPassword('');
+      setSmtpFromEmail('');
+      setSmtpFromName('');
+      setSmtpUseTls('true');
+      setSmtpUseSsl('false');
+      setEmailInboundSecret('');
       return;
     }
     if (channel === 'telegram') {
@@ -2883,6 +2901,15 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setVerifyToken('');
       setAppSecret('');
       setBotToken('');
+      setSmtpHost('');
+      setSmtpPort('');
+      setSmtpUsername('');
+      setSmtpPassword('');
+      setSmtpFromEmail('');
+      setSmtpFromName('');
+      setSmtpUseTls('true');
+      setSmtpUseSsl('false');
+      setEmailInboundSecret('');
       return;
     }
     if (channel === 'whatsapp') {
@@ -2893,6 +2920,15 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setVerifyToken('');
       setAppSecret('');
       setBotToken('');
+      setSmtpHost('');
+      setSmtpPort('');
+      setSmtpUsername('');
+      setSmtpPassword('');
+      setSmtpFromEmail('');
+      setSmtpFromName('');
+      setSmtpUseTls('true');
+      setSmtpUseSsl('false');
+      setEmailInboundSecret('');
       return;
     }
     setEnabled('false');
@@ -2902,6 +2938,15 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     setVerifyToken('');
     setAppSecret('');
     setBotToken('');
+    setSmtpHost('');
+    setSmtpPort('');
+    setSmtpUsername('');
+    setSmtpPassword('');
+    setSmtpFromEmail('');
+    setSmtpFromName('');
+    setSmtpUseTls('true');
+    setSmtpUseSsl('false');
+    setEmailInboundSecret('');
   }, [channel, rows]);
 
   async function submit(e: FormEvent) {
@@ -2929,6 +2974,21 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       credentials.bot_token = botToken.trim();
     }
 
+    if (channel === 'email') {
+      const hasEmailCredentialUpdate = [smtpHost, smtpPort, smtpUsername, smtpPassword, smtpFromEmail, smtpFromName, emailInboundSecret].some((value) => value.trim());
+      if (hasEmailCredentialUpdate) {
+        if (smtpHost.trim()) credentials.smtp_host = smtpHost.trim();
+        if (smtpPort.trim()) credentials.smtp_port = smtpPort.trim();
+        if (smtpUsername.trim()) credentials.smtp_username = smtpUsername.trim();
+        if (smtpPassword.trim()) credentials.smtp_password = smtpPassword.trim();
+        if (smtpFromEmail.trim()) credentials.smtp_from_email = smtpFromEmail.trim();
+        if (smtpFromName.trim()) credentials.smtp_from_name = smtpFromName.trim();
+        if (emailInboundSecret.trim()) credentials.inbound_webhook_secret = emailInboundSecret.trim();
+        credentials.use_tls = smtpUseTls === 'true';
+        credentials.use_ssl = smtpUseSsl === 'true';
+      }
+    }
+
     try {
       await api.saveChannel(token, tenantSlug, channel, { status: derivedSaveStatus(), public_config: publicConfig, credentials });
       await reload();
@@ -2944,6 +3004,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     if (selectedIsFutureAdapter) return 'future';
     if (enabled !== 'true') return currentStatus === 'future' ? 'future' : 'not_connected';
     if (channel === 'web_chat') return 'configured';
+    if (channel === 'email') return 'configured';
     if (channel === 'telegram') {
       if (selectedChannelRow?.has_credentials || botToken.trim()) {
         return implementedReadyStatuses.has(currentStatus) ? currentStatus : 'configured';
@@ -3012,6 +3073,12 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       return 'First-party demo setup pending';
     }
 
+    if (row.channel_type === 'email') {
+      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'SMTP email channel ready';
+      if (enabledFlag && row.has_credentials && readyStatus) return 'Configurable email channel';
+      return enabledFlag ? 'Email setup pending' : 'Disabled for tenant';
+    }
+
     return 'Future adapter';
   }
 
@@ -3019,12 +3086,13 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     if (row.channel_type === 'telegram') return 'Telegram can be used for local/free demo testing.';
     if (row.channel_type === 'whatsapp') return 'WhatsApp requires official Meta credentials before production live send.';
     if (row.channel_type === 'web_chat') return 'First-party demo channel for tenant website testing. No external provider credentials required.';
+    if (row.channel_type === 'email') return 'SMTP outbound plus provider-neutral inbound testing. Production inbox sync can be added later.';
     return 'Planned adapter. Credential setup is not available on this screen yet.';
   }
 
   function channelBadgeClass(row: Channel) {
     const headline = channelHeadline(row);
-    if (headline.includes('ready') || headline.includes('Working') || headline === 'Meta credentials stored' || headline === 'Available for testing') return 'connected';
+    if (headline.includes('ready') || headline.includes('Working') || headline === 'Meta credentials stored' || headline === 'Available for testing' || headline === 'Configurable email channel') return 'connected';
     if (headline === 'Future adapter') return 'future';
     if (row.public_config?.enabled === false) return 'disabled';
     return 'pending';
@@ -3068,6 +3136,17 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         { label: 'Visitor identity', value: 'Generated or supplied by widget' },
         { label: 'Embed widget', value: 'Later' },
         { label: 'Live send', value: liveFlag ? 'On for local/demo testing' : 'Off' },
+      ];
+    }
+
+    if (row.channel_type === 'email') {
+      return [
+        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Disabled' },
+        { label: 'SMTP credentials', value: row.has_credentials ? 'Stored securely' : 'Missing SMTP credentials' },
+        { label: 'Outbound send', value: liveFlag && row.has_credentials ? 'Ready when SMTP accepts mail' : 'Stored only until SMTP is ready' },
+        { label: 'Inbound test endpoint', value: `/channels/email/${tenantSlug}/inbound-test` },
+        { label: 'Inbound secret', value: row.has_credentials ? 'Optional secret may be stored' : 'Optional for local testing' },
+        { label: 'Production inbox sync', value: 'Provider webhook / IMAP later' },
       ];
     }
 
@@ -3154,9 +3233,48 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
           <span className="field-helper">Encrypted after save. The current bot token is never displayed.</span>
           <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste bot token'} value={botToken} onChange={(e) => setBotToken(e.target.value)} autoComplete="off" />
         </label></div>}
+        {channel === 'email' && <div className="channel-secret-grid">
+          <label>SMTP host
+            <span className="field-helper">Encrypted after save. Enter a replacement only when updating email settings.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'smtp.example.com'} value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} autoComplete="off" />
+          </label>
+          <label>SMTP port
+            <span className="field-helper">Usually 587 for TLS or 465 for SSL.</span>
+            <input inputMode="numeric" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : '587'} value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} autoComplete="off" />
+          </label>
+          <label>SMTP username
+            <span className="field-helper">Encrypted after save and never shown back in the UI.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'SMTP username'} value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} autoComplete="off" />
+          </label>
+          <label>SMTP password
+            <span className="field-helper">Encrypted after save. The current password is never displayed.</span>
+            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'SMTP password'} value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label>From email
+            <span className="field-helper">The sender address used for tenant email replies.</span>
+            <input type="email" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'support@business.com'} value={smtpFromEmail} onChange={(e) => setSmtpFromEmail(e.target.value)} autoComplete="off" />
+          </label>
+          <label>From name
+            <span className="field-helper">Optional display name for outbound email.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Business Support'} value={smtpFromName} onChange={(e) => setSmtpFromName(e.target.value)} autoComplete="off" />
+          </label>
+          <label>Use TLS
+            <span className="field-helper">StartTLS is typical for port 587.</span>
+            <select value={smtpUseTls} onChange={(e) => setSmtpUseTls(e.target.value)}><option value="true">true</option><option value="false">false</option></select>
+          </label>
+          <label>Use SSL
+            <span className="field-helper">Usually true only for port 465.</span>
+            <select value={smtpUseSsl} onChange={(e) => setSmtpUseSsl(e.target.value)}><option value="false">false</option><option value="true">true</option></select>
+          </label>
+          <label>Inbound webhook secret
+            <span className="field-helper">Optional for provider-neutral inbound testing. Stored encrypted if entered.</span>
+            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Optional test secret'} value={emailInboundSecret} onChange={(e) => setEmailInboundSecret(e.target.value)} autoComplete="new-password" />
+          </label>
+        </div>}
         {channel === 'telegram' && <div className="channel-help-note neutral"><strong>Testing channel</strong><p>Telegram can be used for local/free demo testing. A provider routing ID is not required unless a specific routing method is added later.</p></div>}
         {channel === 'whatsapp' && <div className="channel-help-note"><strong>Production channel</strong><p>WhatsApp requires official Meta credentials before production live send. Saved values stay hidden and tenant-scoped.</p></div>}
         {channel === 'web_chat' && <div className="channel-help-note neutral"><strong>First-party demo channel</strong><p>Use <code>/channels/web-chat/{tenantSlug}/message</code> with the tenant slug and a visitor ID. A full embeddable widget can be added later.</p></div>}
+        {channel === 'email' && <div className="channel-help-note neutral"><strong>SMTP email channel</strong><p>Use <code>/channels/email/{tenantSlug}/inbound-test</code> for provider-neutral inbound testing. Real inbox sync or provider webhooks can be added later.</p></div>}
         {selectedIsFutureAdapter && <div className="channel-help-note neutral"><strong>Adapter not implemented yet</strong><p>This channel is represented in the platform roadmap, but live enablement is locked until a backend adapter exists.</p></div>}
         {channelMessage && <p className="settings-status success">{channelMessage}</p>}
         <div className="channel-form-actions">
@@ -3174,7 +3292,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         </div>
         <div className="channel-table">
           {channelOptions.map((channelType) => {
-            const row = rows.find((item) => item.channel_type === channelType) || { channel_type: channelType, status: channelType === 'whatsapp' || channelType === 'web_chat' ? 'configured' : channelType === 'telegram' ? 'not_connected' : 'future', public_config: {}, has_credentials: false };
+            const row = rows.find((item) => item.channel_type === channelType) || { channel_type: channelType, status: channelType === 'whatsapp' || channelType === 'web_chat' || channelType === 'email' ? 'configured' : channelType === 'telegram' ? 'not_connected' : 'future', public_config: {}, has_credentials: false };
             const statusClass = channelBadgeClass(row);
             const headline = channelHeadline(row);
             return <div className="channel-status-card" key={row.channel_type}>

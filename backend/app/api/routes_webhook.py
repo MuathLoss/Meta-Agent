@@ -3,15 +3,17 @@ from __future__ import annotations
 import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.rate_limit import client_ip, enforce_rate_limit
-from app.models.entities import ChannelConfig, Tenant, WebhookEvent
+from app.models.entities import ChannelConfig, Conversation, Message, Tenant, WebhookEvent
 from app.services.orchestrator import ConversationOrchestrator
 from app.services.telegram_adapter import TelegramAdapter
 from app.services.tenant_channel_service import TenantChannelService
+from app.services.web_chat_adapter import WebChatAdapter
 from app.services.whatsapp_adapter import WhatsAppAdapter
 
 router = APIRouter(tags=["webhook"])
@@ -19,6 +21,7 @@ channel_service = TenantChannelService()
 orchestrator = ConversationOrchestrator()
 whatsapp_adapter = WhatsAppAdapter()
 telegram_adapter = TelegramAdapter()
+web_chat_adapter = WebChatAdapter()
 logger = logging.getLogger(__name__)
 
 ACTIVE_CHANNEL_STATUSES = {"configured", "connected", "active", "not_connected"}
@@ -29,6 +32,19 @@ WEBHOOK_RATE_LIMIT_WINDOW_SECONDS = 60
 
 class AmbiguousChannelResolution(Exception):
     pass
+
+
+class WebChatMessageRequest(BaseModel):
+    visitor_id: str | None = Field(default=None, max_length=128)
+    message: str = Field(min_length=1, max_length=4000)
+    display_name: str | None = Field(default=None, max_length=120)
+
+
+class EmailInboundTestRequest(BaseModel):
+    from_email: EmailStr
+    from_name: str | None = Field(default=None, max_length=120)
+    subject: str | None = Field(default=None, max_length=255)
+    text: str = Field(min_length=1, max_length=12000)
 
 
 def _is_resolvable_channel(row: ChannelConfig) -> bool:
@@ -55,6 +71,39 @@ def _stored_event_id(tenant_id: int, provider_event_id: str) -> str:
     # The current DB uniqueness is provider-wide. Prefixing at write time gives
     # tenant-aware idempotency without changing schema in this non-destructive patch.
     return f"tenant:{tenant_id}:{provider_event_id}"
+
+
+def _web_chat_enabled(channel: ChannelConfig | None) -> bool:
+    if not channel:
+        return False
+    public_config = channel.public_config_json or {}
+    if public_config.get("enabled") is False:
+        return False
+    return channel.status in {"configured", "connected", "active"}
+
+
+def _email_enabled(channel: ChannelConfig | None) -> bool:
+    if not channel:
+        return False
+    public_config = channel.public_config_json or {}
+    if public_config.get("enabled") is False:
+        return False
+    return channel.status in {"configured", "connected", "active"}
+
+
+def _configured_secret(value: object) -> bool:
+    return settings.configured(value)
+
+
+def _latest_outbound_text(db: Session, *, tenant_id: int, outbound_message_id: int | None) -> str | None:
+    if outbound_message_id is None:
+        return None
+    row = (
+        db.query(Message)
+        .filter(Message.tenant_id == tenant_id, Message.id == outbound_message_id, Message.direction == "outbound")
+        .first()
+    )
+    return row.text if row else None
 
 
 def _allow_unsigned_whatsapp_webhook(signature_header: str | None) -> bool:
@@ -242,3 +291,173 @@ async def receive_telegram_with_token(bot_token: str, request: Request, db: Sess
     if settings.app_env.lower() not in WEBHOOK_DEV_ENVS:
         raise HTTPException(status_code=404, detail="Telegram token-in-path webhook is disabled")
     return await _receive_telegram(request, db, bot_token=bot_token)
+
+
+@router.post("/channels/web-chat/{tenant_slug}/message")
+def receive_web_chat_message(
+    tenant_slug: str,
+    payload: WebChatMessageRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    enforce_rate_limit(
+        f"webhook:web_chat:{tenant_slug}:{client_ip(request)}",
+        max_requests=WEBHOOK_RATE_LIMIT_MAX,
+        window_seconds=WEBHOOK_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    tenant = db.query(Tenant).filter(Tenant.slug == tenant_slug, Tenant.status == "active").first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    channel = (
+        db.query(ChannelConfig)
+        .filter(ChannelConfig.tenant_id == tenant.id, ChannelConfig.channel_type == "web_chat")
+        .first()
+    )
+    if not _web_chat_enabled(channel):
+        raise HTTPException(status_code=403, detail="Web chat is not enabled for this tenant")
+
+    normalized = web_chat_adapter.normalize_inbound(payload.model_dump())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Message text is required")
+
+    visitor_address = f"{tenant.id}:{normalized.visitor_id}"
+    decision = orchestrator.handle_inbound(
+        db,
+        tenant=tenant,
+        customer_phone=visitor_address,
+        text=normalized.text,
+        channel_type="web_chat",
+        provider_message_id=None,
+        payload_json={
+            **normalized.raw,
+            "tenant_slug": tenant.slug,
+        },
+    )
+
+    customer_identity = orchestrator.customer_identity
+    customer = customer_identity.lookup_customer(
+        db,
+        tenant_id=tenant.id,
+        channel_type="web_chat",
+        address=visitor_address,
+    )
+    if customer and normalized.display_name and not customer.name:
+        customer.name = normalized.display_name
+        db.commit()
+
+    conversation = None
+    if customer:
+        conversation = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.customer_id == customer.id,
+                Conversation.channel_type == "web_chat",
+            )
+            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+            .first()
+        )
+
+    outbound_message_id = decision.get("outbound_message_id")
+    reply = decision.get("auto_reply")
+    if not reply and isinstance(outbound_message_id, int):
+        reply = _latest_outbound_text(db, tenant_id=tenant.id, outbound_message_id=outbound_message_id)
+
+    state = conversation.state if conversation else decision.get("state")
+    handoff = bool(state == "HUMAN_HANDOFF" or decision.get("status") in {"handoff", "stored"})
+    return {
+        "visitor_id": normalized.visitor_id,
+        "conversation_id": str(conversation.id) if conversation else None,
+        "reply": reply,
+        "state": state,
+        "handoff": handoff,
+    }
+
+
+@router.post("/channels/email/{tenant_slug}/inbound-test")
+def receive_email_inbound_test(
+    tenant_slug: str,
+    payload: EmailInboundTestRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    enforce_rate_limit(
+        f"webhook:email:{tenant_slug}:{client_ip(request)}",
+        max_requests=WEBHOOK_RATE_LIMIT_MAX,
+        window_seconds=WEBHOOK_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    tenant = db.query(Tenant).filter(Tenant.slug == tenant_slug, Tenant.status == "active").first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    channel = (
+        db.query(ChannelConfig)
+        .filter(ChannelConfig.tenant_id == tenant.id, ChannelConfig.channel_type == "email")
+        .first()
+    )
+    if not _email_enabled(channel):
+        raise HTTPException(status_code=403, detail="Email channel is not enabled for this tenant")
+
+    creds = channel_service.credentials(channel)
+    configured_secret = creds.get("inbound_webhook_secret")
+    provided_secret = request.headers.get("X-Channel-Webhook-Secret")
+    if _configured_secret(configured_secret):
+        if provided_secret != configured_secret:
+            raise HTTPException(status_code=403, detail="Invalid email inbound secret")
+    elif not (settings.allow_unsigned_webhooks_in_dev and settings.app_env.lower() in WEBHOOK_DEV_ENVS):
+        raise HTTPException(status_code=403, detail="Email inbound secret is required")
+
+    from_email = str(payload.from_email).strip().lower()
+    decision = orchestrator.handle_inbound(
+        db,
+        tenant=tenant,
+        customer_phone=from_email,
+        text=payload.text.strip(),
+        channel_type="email",
+        provider_message_id=None,
+        payload_json={
+            "source": "email_inbound_test",
+            "from_email": from_email,
+            "from_name_provided": bool(payload.from_name and payload.from_name.strip()),
+            "subject_provided": bool(payload.subject and payload.subject.strip()),
+        },
+    )
+
+    customer_identity = orchestrator.customer_identity
+    customer = customer_identity.lookup_customer(
+        db,
+        tenant_id=tenant.id,
+        channel_type="email",
+        address=from_email,
+    )
+    if customer and payload.from_name and payload.from_name.strip() and not customer.name:
+        customer.name = payload.from_name.strip()
+        db.commit()
+
+    conversation = None
+    if customer:
+        conversation = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.customer_id == customer.id,
+                Conversation.channel_type == "email",
+            )
+            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+            .first()
+        )
+
+    outbound_message_id = decision.get("outbound_message_id")
+    reply = decision.get("auto_reply")
+    if not reply and isinstance(outbound_message_id, int):
+        reply = _latest_outbound_text(db, tenant_id=tenant.id, outbound_message_id=outbound_message_id)
+
+    state = conversation.state if conversation else decision.get("state")
+    handoff = bool(state == "HUMAN_HANDOFF" or decision.get("status") in {"handoff", "stored"})
+    return {
+        "conversation_id": str(conversation.id) if conversation else None,
+        "state": state,
+        "handoff": handoff,
+        "reply": reply,
+    }

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.redaction import redact_sensitive
 from app.models.entities import ChannelConfig, Message
+from app.services.email_adapter import EmailAdapter
 from app.services.tenant_channel_service import TenantChannelService
 from app.services.telegram_adapter import TelegramAdapter
 from app.services.whatsapp_adapter import WhatsAppAdapter
@@ -25,11 +26,12 @@ class OutboundDispatchResult:
 class OutboundService:
     def __init__(self) -> None:
         self.channel_service = TenantChannelService()
+        self.email = EmailAdapter()
         self.whatsapp = WhatsAppAdapter()
         self.telegram = TelegramAdapter()
 
     def supports_channel(self, channel_type: str) -> bool:
-        return channel_type in {"whatsapp", "telegram"}
+        return channel_type in {"whatsapp", "telegram", "web_chat", "email"}
 
     def channel_ready(self, channel: ChannelConfig) -> tuple[bool, str | None]:
         if not self.supports_channel(channel.channel_type):
@@ -38,6 +40,10 @@ class OutboundService:
         public_config = channel.public_config_json or {}
         if public_config.get("enabled") is False:
             return False, "channel_disabled"
+        if channel.channel_type == "web_chat":
+            if channel.status not in {"configured", "connected", "active"}:
+                return False, f"channel_status_{channel.status}"
+            return True, None
         if public_config.get("live_send_enabled") is not True:
             return False, "live_send_not_enabled"
         if channel.status not in {"configured", "connected", "active"}:
@@ -56,6 +62,9 @@ class OutboundService:
             if not bot_token or bot_token == "pending":
                 return False, "missing_telegram_credentials"
             return True, None
+
+        if channel.channel_type == "email":
+            return self.email.smtp_ready(creds)
 
         return False, "unsupported_channel"
 
@@ -182,6 +191,29 @@ class OutboundService:
                 provider_response=result if isinstance(result, dict) else None,
             )
 
+        if channel.channel_type == "web_chat":
+            return OutboundDispatchResult(
+                channel_type=channel.channel_type,
+                send_status="sent",
+                provider_message_id=f"web-chat-local-{uuid4()}",
+                provider_response={"delivery": "local_widget"},
+            )
+
+        if channel.channel_type == "email":
+            result = self.email.send_text(
+                credentials=creds,
+                to_email=destination,
+                subject="Message from support",
+                text=text,
+            )
+            provider_id = result.get("message_id") if isinstance(result, dict) else None
+            return OutboundDispatchResult(
+                channel_type=channel.channel_type,
+                send_status="sent",
+                provider_message_id=str(provider_id) if provider_id else None,
+                provider_response={"delivery": "smtp"} if isinstance(result, dict) else None,
+            )
+
         return OutboundDispatchResult(
             channel_type=channel.channel_type,
             send_status="no_adapter",
@@ -218,6 +250,16 @@ class OutboundService:
                 text=text,
                 intent_code=intent_code,
                 payload_json={"send_status": "stored_only", "reason": reason, "provider": channel_type, "channel_type": channel_type},
+            )
+
+        if channel_type == "email" and not str(destination or "").strip():
+            return self.store_local_outbound(
+                db,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                text=text,
+                intent_code=intent_code,
+                payload_json={"send_status": "send_failed", "reason": "missing_email_recipient", "provider": channel_type, "channel_type": channel_type},
             )
 
         try:

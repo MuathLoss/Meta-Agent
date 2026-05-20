@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from app.api import routes_channels
 from app.core.security import hash_password
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, require_tenant_roles
-from app.models.entities import ChannelConfig, Customer, Message, Tenant, TenantUserRole, User
+from app.models.entities import ChannelConfig, Conversation, Customer, Message, Tenant, TenantUserRole, User
 from app.schemas.channels import ChannelTestConsoleRequest
 from app.services.tenant_channel_service import TenantChannelService
 
@@ -65,12 +65,12 @@ def test_channel_test_console_enabled_channel_returns_reply_and_synthetic_identi
     assert result["session_id"] == "session-one"
     assert result["handoff"] is False
     assert result["intent"] == "PRICING"
-    assert result["notes"] == ["Dry-run only. No provider outbound API was called."]
-    customer = db.query(Customer).filter(Customer.tenant_id == tenant.id, Customer.phone == "tg:test:1:telegram:session-one").one()
+    assert result["conversation_id"] == f"virtual:{tenant.id}:telegram:session-one"
+    assert result["notes"] == ["Virtual test only. No inbox conversation, customer, message, or provider send was created."]
     assert "telegram-token" not in str(result)
-    outbound = db.query(Message).filter(Message.tenant_id == tenant.id, Message.direction == "outbound").one()
-    assert outbound.payload_json["send_status"] == "dry_run"
-    assert outbound.payload_json["delivery"] == "channel_test_console"
+    assert db.query(Customer).filter(Customer.tenant_id == tenant.id).count() == 0
+    assert db.query(Conversation).filter(Conversation.tenant_id == tenant.id).count() == 0
+    assert db.query(Message).filter(Message.tenant_id == tenant.id).count() == 0
 
 
 def test_channel_test_console_disabled_channel_is_rejected(db, tenant):
@@ -134,7 +134,11 @@ def test_channel_test_console_synthetic_identity_is_tenant_scoped(db, tenant):
     )
 
     assert first.conversation_id != second.conversation_id
-    assert db.query(Customer).filter(Customer.phone.like("webchat:test:%:web_chat:same-session")).count() == 2
+    assert first.conversation_id == f"virtual:{tenant.id}:web_chat:same-session"
+    assert second.conversation_id == f"virtual:{other.id}:web_chat:same-session"
+    assert db.query(Customer).filter(Customer.phone.like("webchat:test:%:web_chat:same-session")).count() == 0
+    assert db.query(Conversation).count() == 0
+    assert db.query(Message).count() == 0
 
 
 def test_channel_test_console_does_not_call_real_provider_sends(db, tenant, monkeypatch):

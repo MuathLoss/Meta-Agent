@@ -94,6 +94,50 @@ export type BroadcastRecipient = {
 export type BusinessSetting = { id: number; key: string; value_json: Record<string, unknown> };
 export type TrainingExample = { id: number; raw_text: string; normalized_text: string; labeled_intent?: string | null; source: string };
 export type AuditLog = { id: number; actor_user_id?: number | null; action: string; entity_type: string; entity_id?: string | null; details_json: Record<string, unknown>; created_at?: string | null };
+export type SmartImportRow = {
+  row_id: string;
+  source_index: number;
+  source_type: string;
+  redacted_excerpt: string;
+  normalized_text: string;
+  detected_language: string;
+  suggested_intent: { code: string; label: string; existing: boolean };
+  confidence: number;
+  suggested_keywords: string[];
+  suggested_faq_topic?: { topic_key: string; question: string; answer: string; existing: boolean; confidence: number } | null;
+  routing_hint: { behavior: string; owner_role?: string | null; reason: string };
+  warnings: string[];
+  decision: 'pending' | 'approved' | 'rejected';
+  editable: {
+    training_example_text: string;
+    intent_code: string;
+    keyword_phrases: string[];
+    faq_topic_key: string;
+    faq_question: string;
+    faq_answer: string;
+    create_intent: boolean;
+    create_faq: boolean;
+  };
+};
+export type SmartImportPreview = {
+  source_type: string;
+  total_rows: number;
+  previewed_rows: number;
+  duplicate_rows: number;
+  max_rows: number;
+  rows: SmartImportRow[];
+  notes: string[];
+};
+export type SmartImportApproveResult = {
+  status: string;
+  approved_training_examples: number;
+  approved_keywords: number;
+  approved_faq_items: number;
+  approved_intents: number;
+  skipped_rows: number;
+  error_count: number;
+  errors: Array<{ row_id: string; detail: string }>;
+};
 export type RuntimeClassification = { intent: Record<string, unknown>; route: Record<string, unknown>; inside_working_hours: boolean };
 export type UatCase = { id: string; message: string; expected_intent?: string | null; expected_action?: string | null; note?: string | null };
 export type UatResult = UatCase & { actual_intent: string; actual_action: string; confidence: number; matched_phrases: string[]; mixed: boolean; passed: boolean; route: Record<string, unknown> };
@@ -200,6 +244,13 @@ export const api = {
   testChannel: (token: string, tenantSlug: string, payload: { channel_type: string; session_id?: string | null; message: string }) => request<ChannelTestConsoleResult>('/channels/test-console/message', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   trainingExamples: (token: string, tenantSlug: string) => request<TrainingExample[]>('/training-examples', auth(token, tenantSlug)),
   createTrainingExample: (token: string, tenantSlug: string, payload: { raw_text: string; labeled_intent?: string | null }) => request('/training-examples', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
+  smartImportPreviewText: (token: string, tenantSlug: string, payload: { text: string; source_type?: string }) => request<SmartImportPreview>('/imports/smart/preview-text', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
+  smartImportPreviewFile: (token: string, tenantSlug: string, file: File) => {
+    const body = new FormData();
+    body.append('file', file);
+    return request<SmartImportPreview>('/imports/smart/preview-file', { method: 'POST', body, ...auth(token, tenantSlug) });
+  },
+  smartImportApprove: (token: string, tenantSlug: string, payload: { source_type: string; total_rows: number; items: Array<Record<string, unknown>> }) => request<SmartImportApproveResult>('/imports/smart/approve', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   auditLogs: (token: string, tenantSlug: string) => request<AuditLog[]>('/audit-logs', auth(token, tenantSlug)),
   previewInbound: (token: string, tenantSlug: string, text: string, customer_phone = '0500000000') => request<{ decision: Record<string, unknown> }>('/dashboard/preview/inbound', { method: 'POST', body: JSON.stringify({ customer_phone, text, channel_type: 'whatsapp' }), ...auth(token, tenantSlug) }),
   saveOnboardingStep: (token: string, tenantSlug: string, step: number, data: Record<string, unknown>) => request<{ saved: boolean; step: number }>("/onboarding/step/" + step, { method: "POST", body: JSON.stringify({ data }), ...auth(token, tenantSlug) }),

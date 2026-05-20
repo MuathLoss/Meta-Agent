@@ -5,9 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, get_current_tenant, require_tenant_roles
-from app.models.entities import Conversation, Message, Tenant
+from app.models.entities import Tenant
 from app.schemas.channels import ChannelConfigRequest, ChannelConfigResponse, ChannelTestConsoleRequest, ChannelTestConsoleResponse
-from app.services.dry_run_context import dry_run_outbound
 from app.services.email_polling_service import EmailPollingService
 from app.services.orchestrator import ConversationOrchestrator
 from app.services.tenant_channel_service import DuplicateProviderChannelError, TenantChannelService, UnsafePublicConfigError, sanitize_public_config
@@ -79,63 +78,43 @@ def test_console_message(
         raise HTTPException(status_code=403, detail=reason or "channel_not_available")
 
     session_id = _normalize_test_session_id(payload.session_id)
-    test_identity = f"test:{tenant.id}:{channel_type}:{session_id}"
-    with dry_run_outbound():
-        decision = test_console_orchestrator.handle_inbound(
+    message = payload.message.strip()
+    preview = test_console_orchestrator.preview_classification(db, tenant=tenant, text=message)
+    intent_payload = preview.get("intent") if isinstance(preview, dict) else {}
+    route_payload = preview.get("route") if isinstance(preview, dict) else {}
+    intent = str(intent_payload.get("intent_code") or "UNKNOWN") if isinstance(intent_payload, dict) else "UNKNOWN"
+    confidence = float(intent_payload.get("confidence") or 0) if isinstance(intent_payload, dict) else 0.0
+    needs_clarification = bool(intent_payload.get("needs_clarification")) if isinstance(intent_payload, dict) else True
+    route_action = str(route_payload.get("action") or "CLARIFY") if isinstance(route_payload, dict) else "CLARIFY"
+
+    if intent in {"HUMAN_REQUEST", "COMPLAINT"} or route_action in {"HANDOFF", "TICKET"}:
+        state = "HUMAN_HANDOFF"
+        reply = None
+        handoff = True
+    elif intent == "UNKNOWN" or needs_clarification or confidence < 0.67:
+        state = "CLARIFYING"
+        reply = test_console_orchestrator.response_engine.clarification_question(tenant)
+        handoff = False
+    else:
+        state = "BOT_ACTIVE"
+        reply = test_console_orchestrator.response_engine.build_response(
             db,
-            tenant=tenant,
-            customer_phone=test_identity,
-            text=payload.message.strip(),
-            channel_type=channel_type,
-            provider_message_id=None,
-            payload_json={
-                "source": "channel_test_console",
-                "session_id": session_id,
-                "channel_type": channel_type,
-                "dry_run": True,
-            },
-        )
+            tenant,
+            intent,
+            faq_topic_key=intent_payload.get("faq_topic_key") if isinstance(intent_payload, dict) else None,
+            preferred_lang=(preview.get("language") or {}).get("resolved_lang") if isinstance(preview.get("language"), dict) else None,
+        ) or test_console_orchestrator.response_engine.clarification_question(tenant)
+        handoff = False
 
-    customer = test_console_orchestrator.customer_identity.lookup_customer(
-        db,
-        tenant_id=tenant.id,
-        channel_type=channel_type,
-        address=test_identity,
-    )
-    conversation = None
-    if customer:
-        conversation = (
-            db.query(Conversation)
-            .filter(
-                Conversation.tenant_id == tenant.id,
-                Conversation.customer_id == customer.id,
-                Conversation.channel_type == channel_type,
-            )
-            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
-            .first()
-        )
-
-    outbound_message_id = decision.get("outbound_message_id")
-    reply = decision.get("auto_reply")
-    if not reply and isinstance(outbound_message_id, int):
-        row = db.query(Message).filter(Message.tenant_id == tenant.id, Message.id == outbound_message_id, Message.direction == "outbound").first()
-        reply = row.text if row else None
-
-    state = conversation.state if conversation else decision.get("state")
-    intent_payload = decision.get("intent")
-    intent = intent_payload.get("intent_code") if isinstance(intent_payload, dict) else None
-    if not intent and conversation:
-        intent = conversation.last_intent
-    handoff = bool(state == "HUMAN_HANDOFF" or decision.get("status") in {"handoff", "stored"})
     return ChannelTestConsoleResponse(
         session_id=session_id,
         channel_type=channel_type,
-        conversation_id=str(conversation.id) if conversation else None,
+        conversation_id=f"virtual:{tenant.id}:{channel_type}:{session_id}",
         reply=reply,
         state=state,
         handoff=handoff,
         intent=intent,
-        notes=["Dry-run only. No provider outbound API was called."],
+        notes=["Virtual test only. No inbox conversation, customer, message, or provider send was created."],
     )
 
 @router.post("/email/{tenant_slug}/poll-once")

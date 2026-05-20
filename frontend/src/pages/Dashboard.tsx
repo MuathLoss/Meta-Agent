@@ -16,6 +16,8 @@ import {
   type IntentItem,
   type Readiness,
   type RuntimeClassification,
+  type SmartImportPreview,
+  type SmartImportRow,
   type UatRun,
   type DeploymentChecklist,
   type DeploymentEnvironment,
@@ -1961,6 +1963,8 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
       </div>
     </div>
 
+    <SmartImportStudio token={token} tenantSlug={tenantSlug} reload={reload} />
+
     <div className="knowledge-cards-grid">
       {items.length === 0 && <div className="card knowledge-empty-state"><strong>No approved answers yet</strong><p className="muted">Add the first response to teach the assistant how to answer a real customer question.</p></div>}
       {items.length > 0 && filteredItems.length === 0 && <div className="card knowledge-empty-state"><strong>No matching responses</strong><p className="muted">Try another search term or switch the status filter.</p></div>}
@@ -2230,6 +2234,213 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
           <button className="secondary" onClick={() => setPendingDelete(null)} disabled={deleting}>Cancel</button>
         </div>
       </div>
+    </div>}
+  </section>;
+}
+
+function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenantSlug: string; reload: () => Promise<void> }) {
+  const [pasteText, setPasteText] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<SmartImportPreview | null>(null);
+  const [rows, setRows] = useState<SmartImportRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [resultMessage, setResultMessage] = useState<string | null>(null);
+  const approvedCount = rows.filter((row) => row.decision === 'approved').length;
+  const rejectedCount = rows.filter((row) => row.decision === 'rejected').length;
+  const highConfidenceCount = rows.filter((row) => row.confidence >= 0.8 && !row.warnings.includes('needs_review')).length;
+
+  async function runPreview(mode: 'paste' | 'file') {
+    setLoading(true);
+    setError(null);
+    setResultMessage(null);
+    try {
+      const next = mode === 'file'
+        ? file
+          ? await api.smartImportPreviewFile(token, tenantSlug, file)
+          : null
+        : await api.smartImportPreviewText(token, tenantSlug, { text: pasteText, source_type: 'paste' });
+      if (!next) {
+        setError('Choose a file to preview.');
+        return;
+      }
+      setPreview(next);
+      setRows(next.rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to preview import.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateRow(rowId: string, patch: Partial<SmartImportRow>) {
+    setRows((current) => current.map((row) => row.row_id === rowId ? { ...row, ...patch } : row));
+  }
+
+  function updateEditable(rowId: string, patch: Partial<SmartImportRow['editable']>) {
+    setRows((current) => current.map((row) => row.row_id === rowId ? { ...row, editable: { ...row.editable, ...patch } } : row));
+  }
+
+  function approveHighConfidence() {
+    setRows((current) => current.map((row) => row.confidence >= 0.8 && !row.warnings.includes('needs_review') ? { ...row, decision: 'approved' } : row));
+  }
+
+  function rejectLowConfidence() {
+    setRows((current) => current.map((row) => row.confidence < 0.6 || row.warnings.includes('needs_review') ? { ...row, decision: 'rejected' } : row));
+  }
+
+  function resetImport() {
+    setPreview(null);
+    setRows([]);
+    setPasteText('');
+    setFile(null);
+    setError(null);
+    setResultMessage(null);
+  }
+
+  async function confirmImport() {
+    setApproving(true);
+    setError(null);
+    setResultMessage(null);
+    try {
+      const items = rows.map((row) => {
+        const answer = row.editable.faq_answer.trim();
+        const answerIsArabic = /[\u0600-\u06FF]/.test(answer);
+        return {
+          row_id: row.row_id,
+          decision: row.decision,
+          redacted_excerpt: row.redacted_excerpt,
+          normalized_text: row.normalized_text,
+          intent_code: row.editable.intent_code,
+          intent_label: row.suggested_intent.label,
+          create_intent: row.editable.create_intent,
+          training_example_text: row.editable.training_example_text,
+          keyword_phrases: row.editable.keyword_phrases,
+          create_faq: row.editable.create_faq,
+          faq_topic_key: row.editable.faq_topic_key,
+          faq_question: row.editable.faq_question,
+          faq_answer_ar: answerIsArabic ? answer : '',
+          faq_answer_en: answerIsArabic ? '' : answer,
+        };
+      });
+      const result = await api.smartImportApprove(token, tenantSlug, {
+        source_type: preview?.source_type || 'preview',
+        total_rows: preview?.total_rows || rows.length,
+        items,
+      });
+      setResultMessage(`Imported ${result.approved_training_examples} training examples, ${result.approved_keywords} keywords, and ${result.approved_faq_items} FAQ items.`);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to confirm import.');
+    } finally {
+      setApproving(false);
+    }
+  }
+
+  return <section className="card smart-import-studio">
+    <div className="smart-import-head">
+      <div>
+        <p className="eyebrow">Smart Import Studio</p>
+        <h3>Turn messy customer messages into reviewable drafts</h3>
+        <p className="muted">Paste WhatsApp exports or upload TXT, CSV, or XLSX files. Nothing is saved until you approve selected suggestions.</p>
+      </div>
+      <div className="smart-import-summary">
+        <div><span>Previewed</span><strong>{rows.length}</strong></div>
+        <div><span>Approved</span><strong>{approvedCount}</strong></div>
+        <div><span>Rejected</span><strong>{rejectedCount}</strong></div>
+      </div>
+    </div>
+
+    <div className="smart-import-input-grid">
+      <label>Paste raw chat or messages
+        <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={'[5/20/26, 9:01 AM] Customer: كم السعر؟\nCustomer: I want to register\nعندي شكوى'} />
+      </label>
+      <div className="smart-import-upload-panel">
+        <strong>Upload file</strong>
+        <p className="muted">Use one-column CSV, TXT exports, or XLSX when backend support is available. Files are previewed only and not stored permanently.</p>
+        <label className="smart-import-file-button">
+          <input type="file" accept=".txt,.csv,.xlsx,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] || null)} />
+          <span>{file ? file.name : 'Choose TXT, CSV, or XLSX'}</span>
+        </label>
+        <div className="button-row">
+          <button type="button" onClick={() => void runPreview('paste')} disabled={loading || !pasteText.trim()}>{loading ? 'Previewing...' : 'Preview pasted text'}</button>
+          <button type="button" className="secondary" onClick={() => void runPreview('file')} disabled={loading || !file}>{loading ? 'Previewing...' : 'Preview file'}</button>
+        </div>
+      </div>
+    </div>
+
+    {error && <div className="error-box">{error}</div>}
+    {resultMessage && <p className="success-text smart-import-result">{resultMessage}</p>}
+
+    <div className="smart-import-actions">
+      <div>
+        <strong>{preview ? `${preview.previewed_rows} suggestions ready` : 'No preview yet'}</strong>
+        <p className="muted">{preview ? `${preview.duplicate_rows} duplicates skipped from ${preview.total_rows} parsed rows. Preview cap: ${preview.max_rows}.` : 'Preview creates redacted drafts for admin review.'}</p>
+      </div>
+      <div className="button-row">
+        <button type="button" className="secondary" onClick={approveHighConfidence} disabled={rows.length === 0}>Approve high confidence ({highConfidenceCount})</button>
+        <button type="button" className="secondary" onClick={rejectLowConfidence} disabled={rows.length === 0}>Reject low confidence</button>
+        <button type="button" className="secondary" onClick={resetImport} disabled={loading || approving || (!preview && !pasteText && !file)}>Clear</button>
+        <button type="button" onClick={() => void confirmImport()} disabled={approving || approvedCount === 0}>{approving ? 'Importing...' : 'Confirm import'}</button>
+      </div>
+    </div>
+
+    {rows.length === 0 && <div className="smart-import-empty">
+      <strong>Preview suggestions will appear here</strong>
+      <p className="muted">The studio redacts emails, phone numbers, and URLs, then suggests training examples, keywords, and FAQ drafts for approval.</p>
+    </div>}
+
+    {rows.length > 0 && <div className="smart-import-list">
+      {rows.map((row) => <article className={`smart-import-row decision-${row.decision}`} key={row.row_id}>
+        <div className="smart-import-row-main">
+          <div>
+            <div className="smart-import-row-top">
+              <span className="config-badge">{row.detected_language.toUpperCase()}</span>
+              <span className={`smart-confidence ${row.confidence >= 0.8 ? 'high' : row.confidence >= 0.6 ? 'medium' : 'low'}`}>{Math.round(row.confidence * 100)}%</span>
+              <span className="config-badge secondary-pill">{row.suggested_intent.code}</span>
+              {!row.suggested_intent.existing && <span className="config-status-pill inactive">new intent candidate</span>}
+            </div>
+            <p className="smart-import-excerpt" dir="auto">{row.redacted_excerpt}</p>
+            <p className="smart-import-normalized" dir="auto">{row.normalized_text}</p>
+          </div>
+          <div className="smart-import-decision">
+            <button type="button" className={row.decision === 'approved' ? 'active' : ''} onClick={() => updateRow(row.row_id, { decision: row.decision === 'approved' ? 'pending' : 'approved' })}>Approve</button>
+            <button type="button" className={row.decision === 'rejected' ? 'active reject' : ''} onClick={() => updateRow(row.row_id, { decision: row.decision === 'rejected' ? 'pending' : 'rejected' })}>Reject</button>
+          </div>
+        </div>
+
+        <div className="smart-import-detail-grid">
+          <label>Intent code
+            <input value={row.editable.intent_code} onChange={(e) => updateEditable(row.row_id, { intent_code: normalizeIntentCode(e.target.value) })} />
+          </label>
+          <label>Keyword suggestions
+            <input value={row.editable.keyword_phrases.join(', ')} onChange={(e) => updateEditable(row.row_id, { keyword_phrases: e.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} />
+          </label>
+          <label>Training example
+            <input value={row.editable.training_example_text} onChange={(e) => updateEditable(row.row_id, { training_example_text: e.target.value })} />
+          </label>
+          <label>FAQ topic
+            <input value={row.editable.faq_topic_key} onChange={(e) => updateEditable(row.row_id, { faq_topic_key: normalizeTopicKey(e.target.value) })} placeholder="pricing" />
+          </label>
+        </div>
+
+        <div className="smart-import-options">
+          <label className="check-row"><input type="checkbox" checked={row.editable.create_intent} onChange={(e) => updateEditable(row.row_id, { create_intent: e.target.checked })} disabled={row.suggested_intent.existing} /> Create new intent if missing</label>
+          <label className="check-row"><input type="checkbox" checked={row.editable.create_faq} onChange={(e) => updateEditable(row.row_id, { create_faq: e.target.checked })} /> Create FAQ item with approved answer</label>
+          {row.editable.create_faq && <label className="smart-import-answer">Official answer
+            <textarea value={row.editable.faq_answer} onChange={(e) => updateEditable(row.row_id, { faq_answer: e.target.value })} placeholder="Needs official answer" />
+          </label>}
+        </div>
+
+        <div className="smart-import-meta">
+          <span>{row.suggested_faq_topic?.existing ? `Links to FAQ: ${row.suggested_faq_topic.topic_key}` : row.suggested_faq_topic ? `FAQ draft: ${row.suggested_faq_topic.topic_key}` : 'No FAQ suggestion'}</span>
+          <span>{row.routing_hint.behavior} · {row.routing_hint.reason}</span>
+        </div>
+        {row.warnings.length > 0 && <div className="chip-cloud">
+          {row.warnings.map((warning) => <span key={warning} className="config-chip secondary-chip">{warning}</span>)}
+        </div>}
+      </article>)}
     </div>}
   </section>;
 }

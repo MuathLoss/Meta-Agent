@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api import routes_auth, routes_onboarding, routes_channels, routes_dashboard, routes_broadcasts, routes_webhook, routes_config, routes_operations, routes_runtime, routes_uat, routes_deployment, routes_acceptance
+from app.api import routes_auth, routes_onboarding, routes_channels, routes_dashboard, routes_broadcasts, routes_webhook, routes_config, routes_operations, routes_runtime, routes_uat, routes_deployment, routes_acceptance, routes_imports
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.services.email_polling_scheduler import EmailPollingBackgroundTask
@@ -92,6 +92,7 @@ app.include_router(routes_operations.router)
 app.include_router(routes_runtime.router)
 app.include_router(routes_uat.router)
 app.include_router(routes_deployment.router)
+app.include_router(routes_imports.router)
 
 app.include_router(routes_acceptance.router)
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")

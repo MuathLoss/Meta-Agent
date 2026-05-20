@@ -728,6 +728,109 @@ pre { overflow: auto; white-space: pre-wrap; border-radius: 16px; padding: 1rem;
 .channel-secret-grid label {
   gap: .32rem;
 }
+.channel-readonly-status {
+  display: grid;
+  gap: .24rem;
+  padding: .75rem .82rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(15,23,42,.38);
+}
+.channel-readonly-status span,
+.channel-toggle-field > span {
+  color: #f8fafc;
+  font-size: .82rem;
+  font-weight: 850;
+}
+.channel-readonly-status strong {
+  width: fit-content;
+  padding: .3rem .62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(248,113,113,.18);
+  background: rgba(127,29,29,.12);
+  color: #fecaca;
+  font-size: .72rem;
+  font-weight: 900;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.channel-readonly-status p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: .78rem;
+  line-height: 1.4;
+}
+.channel-toggle-field {
+  display: grid;
+  gap: .34rem;
+  min-width: 0;
+}
+.channel-toggle-field.disabled {
+  opacity: .62;
+}
+.toggle-switch {
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .42rem .56rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148,163,184,.18);
+  background: rgba(15,23,42,.54);
+  color: #cbd5e1;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+.toggle-switch:hover:not(:disabled) {
+  border-color: rgba(248,113,113,.26);
+  transform: none;
+}
+.toggle-switch:disabled {
+  cursor: not-allowed;
+}
+.toggle-switch strong {
+  min-width: 72px;
+  text-align: right;
+  color: #e5e7eb;
+  font-size: .8rem;
+  font-weight: 850;
+}
+.toggle-track {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(71,85,105,.62);
+  border: 1px solid rgba(255,255,255,.1);
+  transition: background .18s ease, border-color .18s ease;
+}
+.toggle-track i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #f8fafc;
+  box-shadow: 0 4px 12px rgba(0,0,0,.28);
+  transition: transform .2s ease;
+}
+.toggle-switch.on {
+  border-color: rgba(34,197,94,.25);
+  background: rgba(20,83,45,.18);
+}
+.toggle-switch.on .toggle-track {
+  background: rgba(34,197,94,.46);
+  border-color: rgba(134,239,172,.28);
+}
+.toggle-switch.on .toggle-track i {
+  transform: translateX(22px);
+}
+.toggle-switch.on strong {
+  color: #bbf7d0;
+}
 .channel-help-note {
   display: grid;
   gap: .22rem;

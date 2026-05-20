@@ -2843,7 +2843,7 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
 
 function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {
   const channelOptions = ['whatsapp', 'telegram', 'email', 'instagram', 'facebook', 'web_chat'];
-  const futureAdapters = new Set(['instagram', 'facebook']);
+  const futureAdapters = new Set<string>();
   const [channel, setChannel] = useState('whatsapp');
   const [enabled, setEnabled] = useState('true');
   const [liveSendEnabled, setLiveSendEnabled] = useState('false');
@@ -2861,6 +2861,13 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
   const [smtpUseTls, setSmtpUseTls] = useState('true');
   const [smtpUseSsl, setSmtpUseSsl] = useState('false');
   const [emailInboundSecret, setEmailInboundSecret] = useState('');
+  const [metaPageAccessToken, setMetaPageAccessToken] = useState('');
+  const [metaAppSecret, setMetaAppSecret] = useState('');
+  const [metaVerifyToken, setMetaVerifyToken] = useState('');
+  const [metaWebhookSecret, setMetaWebhookSecret] = useState('');
+  const [metaPageId, setMetaPageId] = useState('');
+  const [metaInstagramBusinessAccountId, setMetaInstagramBusinessAccountId] = useState('');
+  const [metaGraphApiVersion, setMetaGraphApiVersion] = useState('');
   const [savingChannel, setSavingChannel] = useState(false);
   const [channelMessage, setChannelMessage] = useState<string | null>(null);
 
@@ -2891,6 +2898,13 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setSmtpUseTls('true');
       setSmtpUseSsl('false');
       setEmailInboundSecret('');
+      setMetaPageAccessToken('');
+      setMetaAppSecret('');
+      setMetaVerifyToken('');
+      setMetaWebhookSecret('');
+      setMetaPageId('');
+      setMetaInstagramBusinessAccountId('');
+      setMetaGraphApiVersion('');
       return;
     }
     if (channel === 'telegram') {
@@ -2910,6 +2924,13 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setSmtpUseTls('true');
       setSmtpUseSsl('false');
       setEmailInboundSecret('');
+      setMetaPageAccessToken('');
+      setMetaAppSecret('');
+      setMetaVerifyToken('');
+      setMetaWebhookSecret('');
+      setMetaPageId('');
+      setMetaInstagramBusinessAccountId('');
+      setMetaGraphApiVersion('');
       return;
     }
     if (channel === 'whatsapp') {
@@ -2929,6 +2950,13 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       setSmtpUseTls('true');
       setSmtpUseSsl('false');
       setEmailInboundSecret('');
+      setMetaPageAccessToken('');
+      setMetaAppSecret('');
+      setMetaVerifyToken('');
+      setMetaWebhookSecret('');
+      setMetaPageId('');
+      setMetaInstagramBusinessAccountId('');
+      setMetaGraphApiVersion('');
       return;
     }
     setEnabled('false');
@@ -2947,6 +2975,13 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     setSmtpUseTls('true');
     setSmtpUseSsl('false');
     setEmailInboundSecret('');
+    setMetaPageAccessToken('');
+    setMetaAppSecret('');
+    setMetaVerifyToken('');
+    setMetaWebhookSecret('');
+    setMetaPageId('');
+    setMetaInstagramBusinessAccountId('');
+    setMetaGraphApiVersion('');
   }, [channel, rows]);
 
   async function submit(e: FormEvent) {
@@ -2989,6 +3024,27 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       }
     }
 
+    if (channel === 'instagram' || channel === 'facebook') {
+      const hasMetaCredentialUpdate = [
+        metaPageAccessToken,
+        metaAppSecret,
+        metaVerifyToken,
+        metaWebhookSecret,
+        metaPageId,
+        metaInstagramBusinessAccountId,
+        metaGraphApiVersion,
+      ].some((value) => value.trim());
+      if (hasMetaCredentialUpdate) {
+        if (metaPageAccessToken.trim()) credentials.page_access_token = metaPageAccessToken.trim();
+        if (metaAppSecret.trim()) credentials.app_secret = metaAppSecret.trim();
+        if (metaVerifyToken.trim()) credentials.verify_token = metaVerifyToken.trim();
+        if (metaWebhookSecret.trim()) credentials.webhook_secret = metaWebhookSecret.trim();
+        if (metaPageId.trim()) credentials.page_id = metaPageId.trim();
+        if (metaInstagramBusinessAccountId.trim()) credentials.instagram_business_account_id = metaInstagramBusinessAccountId.trim();
+        if (metaGraphApiVersion.trim()) credentials.graph_api_version = metaGraphApiVersion.trim();
+      }
+    }
+
     try {
       await api.saveChannel(token, tenantSlug, channel, { status: derivedSaveStatus(), public_config: publicConfig, credentials });
       await reload();
@@ -3005,6 +3061,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     if (enabled !== 'true') return currentStatus === 'future' ? 'future' : 'not_connected';
     if (channel === 'web_chat') return 'configured';
     if (channel === 'email') return 'configured';
+    if (channel === 'instagram' || channel === 'facebook') return 'configured';
     if (channel === 'telegram') {
       if (selectedChannelRow?.has_credentials || botToken.trim()) {
         return implementedReadyStatuses.has(currentStatus) ? currentStatus : 'configured';
@@ -3079,6 +3136,12 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
       return enabledFlag ? 'Email setup pending' : 'Disabled for tenant';
     }
 
+    if (row.channel_type === 'instagram' || row.channel_type === 'facebook') {
+      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'Credential-ready skeleton';
+      if (enabledFlag && row.has_credentials && readyStatus) return 'Meta setup stored';
+      return enabledFlag ? 'Meta setup pending' : 'Disabled for tenant';
+    }
+
     return 'Future adapter';
   }
 
@@ -3087,6 +3150,8 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
     if (row.channel_type === 'whatsapp') return 'WhatsApp requires official Meta credentials before production live send.';
     if (row.channel_type === 'web_chat') return 'First-party demo channel for tenant website testing. No external provider credentials required.';
     if (row.channel_type === 'email') return 'SMTP outbound plus provider-neutral inbound testing. Production inbox sync can be added later.';
+    if (row.channel_type === 'instagram') return 'Meta social messaging channel. Real testing requires Instagram business permissions and app review.';
+    if (row.channel_type === 'facebook') return 'Meta social messaging channel. Real testing requires page permissions and app review.';
     return 'Planned adapter. Credential setup is not available on this screen yet.';
   }
 
@@ -3147,6 +3212,19 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         { label: 'Inbound test endpoint', value: `/channels/email/${tenantSlug}/inbound-test` },
         { label: 'Inbound secret', value: row.has_credentials ? 'Optional secret may be stored' : 'Optional for local testing' },
         { label: 'Production inbox sync', value: 'Provider webhook / IMAP later' },
+      ];
+    }
+
+    if (row.channel_type === 'instagram' || row.channel_type === 'facebook') {
+      const accountLabel = row.channel_type === 'instagram' ? 'Instagram business account ID' : 'Page ID';
+      return [
+        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Disabled' },
+        { label: 'Meta credentials', value: row.has_credentials ? 'Stored securely' : 'Missing Meta credentials' },
+        { label: accountLabel, value: row.has_credentials ? 'Stored securely if provided' : 'Required before live testing' },
+        { label: 'Inbound test endpoint', value: `/channels/${row.channel_type}/${tenantSlug}/inbound-test` },
+        { label: 'Provider sender identity', value: 'Stored from inbound test sender ID' },
+        { label: 'Live send', value: liveFlag && row.has_credentials ? 'On after Meta setup' : 'Stored only until credentials are ready' },
+        { label: 'Meta app review', value: 'Required for real production messaging' },
       ];
     }
 
@@ -3271,10 +3349,41 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
             <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Optional test secret'} value={emailInboundSecret} onChange={(e) => setEmailInboundSecret(e.target.value)} autoComplete="new-password" />
           </label>
         </div>}
+        {(channel === 'instagram' || channel === 'facebook') && <div className="channel-secret-grid">
+          <label>Page access token
+            <span className="field-helper">Encrypted after save. The current token is never displayed.</span>
+            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste page access token'} value={metaPageAccessToken} onChange={(e) => setMetaPageAccessToken(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label>App secret
+            <span className="field-helper">Encrypted after save and used for future Meta webhook signature checks.</span>
+            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste app secret'} value={metaAppSecret} onChange={(e) => setMetaAppSecret(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label>Verify token
+            <span className="field-helper">Encrypted after save. Used later when enabling real Meta webhook verification.</span>
+            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste verify token'} value={metaVerifyToken} onChange={(e) => setMetaVerifyToken(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label>Inbound test secret
+            <span className="field-helper">Optional provider-neutral test secret. Stored encrypted if entered.</span>
+            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Optional test secret'} value={metaWebhookSecret} onChange={(e) => setMetaWebhookSecret(e.target.value)} autoComplete="new-password" />
+          </label>
+          <label>Page ID
+            <span className="field-helper">Required for Facebook Messenger live testing. Optional context for Instagram setup.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Meta page ID'} value={metaPageId} onChange={(e) => setMetaPageId(e.target.value)} autoComplete="off" />
+          </label>
+          <label>Instagram business account ID
+            <span className="field-helper">Required for Instagram live testing. Leave blank for Facebook-only setup.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Instagram business account ID'} value={metaInstagramBusinessAccountId} onChange={(e) => setMetaInstagramBusinessAccountId(e.target.value)} autoComplete="off" />
+          </label>
+          <label>Graph API version
+            <span className="field-helper">Optional. Defaults safely on the backend when omitted.</span>
+            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'v20.0'} value={metaGraphApiVersion} onChange={(e) => setMetaGraphApiVersion(e.target.value)} autoComplete="off" />
+          </label>
+        </div>}
         {channel === 'telegram' && <div className="channel-help-note neutral"><strong>Testing channel</strong><p>Telegram can be used for local/free demo testing. A provider routing ID is not required unless a specific routing method is added later.</p></div>}
         {channel === 'whatsapp' && <div className="channel-help-note"><strong>Production channel</strong><p>WhatsApp requires official Meta credentials before production live send. Saved values stay hidden and tenant-scoped.</p></div>}
         {channel === 'web_chat' && <div className="channel-help-note neutral"><strong>First-party demo channel</strong><p>Use <code>/channels/web-chat/{tenantSlug}/message</code> with the tenant slug and a visitor ID. A full embeddable widget can be added later.</p></div>}
         {channel === 'email' && <div className="channel-help-note neutral"><strong>SMTP email channel</strong><p>Use <code>/channels/email/{tenantSlug}/inbound-test</code> for provider-neutral inbound testing. Real inbox sync or provider webhooks can be added later.</p></div>}
+        {(channel === 'instagram' || channel === 'facebook') && <div className="channel-help-note neutral"><strong>Meta social messaging channel</strong><p>Use <code>/channels/{channel}/{tenantSlug}/inbound-test</code> for provider-neutral testing. Real Meta testing requires app/page permissions and may require app review.</p></div>}
         {selectedIsFutureAdapter && <div className="channel-help-note neutral"><strong>Adapter not implemented yet</strong><p>This channel is represented in the platform roadmap, but live enablement is locked until a backend adapter exists.</p></div>}
         {channelMessage && <p className="settings-status success">{channelMessage}</p>}
         <div className="channel-form-actions">
@@ -3292,7 +3401,7 @@ function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token:
         </div>
         <div className="channel-table">
           {channelOptions.map((channelType) => {
-            const row = rows.find((item) => item.channel_type === channelType) || { channel_type: channelType, status: channelType === 'whatsapp' || channelType === 'web_chat' || channelType === 'email' ? 'configured' : channelType === 'telegram' ? 'not_connected' : 'future', public_config: {}, has_credentials: false };
+            const row = rows.find((item) => item.channel_type === channelType) || { channel_type: channelType, status: ['whatsapp', 'web_chat', 'email', 'instagram', 'facebook'].includes(channelType) ? 'configured' : channelType === 'telegram' ? 'not_connected' : 'future', public_config: {}, has_credentials: false };
             const statusClass = channelBadgeClass(row);
             const headline = channelHeadline(row);
             return <div className="channel-status-card" key={row.channel_type}>

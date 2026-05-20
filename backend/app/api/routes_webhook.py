@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.rate_limit import client_ip, enforce_rate_limit
 from app.models.entities import ChannelConfig, Conversation, Message, Tenant, WebhookEvent
+from app.services.meta_social_adapter import MetaSocialAdapter
 from app.services.orchestrator import ConversationOrchestrator
 from app.services.telegram_adapter import TelegramAdapter
 from app.services.tenant_channel_service import TenantChannelService
@@ -22,6 +23,7 @@ orchestrator = ConversationOrchestrator()
 whatsapp_adapter = WhatsAppAdapter()
 telegram_adapter = TelegramAdapter()
 web_chat_adapter = WebChatAdapter()
+meta_social_adapter = MetaSocialAdapter()
 logger = logging.getLogger(__name__)
 
 ACTIVE_CHANNEL_STATUSES = {"configured", "connected", "active", "not_connected"}
@@ -45,6 +47,12 @@ class EmailInboundTestRequest(BaseModel):
     from_name: str | None = Field(default=None, max_length=120)
     subject: str | None = Field(default=None, max_length=255)
     text: str = Field(min_length=1, max_length=12000)
+
+
+class MetaSocialInboundTestRequest(BaseModel):
+    sender_id: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=4000)
+    display_name: str | None = Field(default=None, max_length=120)
 
 
 def _is_resolvable_channel(row: ChannelConfig) -> bool:
@@ -83,6 +91,15 @@ def _web_chat_enabled(channel: ChannelConfig | None) -> bool:
 
 
 def _email_enabled(channel: ChannelConfig | None) -> bool:
+    if not channel:
+        return False
+    public_config = channel.public_config_json or {}
+    if public_config.get("enabled") is False:
+        return False
+    return channel.status in {"configured", "connected", "active"}
+
+
+def _meta_social_enabled(channel: ChannelConfig | None) -> bool:
     if not channel:
         return False
     public_config = channel.public_config_json or {}
@@ -461,3 +478,114 @@ def receive_email_inbound_test(
         "handoff": handoff,
         "reply": reply,
     }
+
+
+def _receive_meta_social_inbound_test(
+    channel_type: str,
+    tenant_slug: str,
+    payload: MetaSocialInboundTestRequest,
+    request: Request,
+    db: Session,
+):
+    enforce_rate_limit(
+        f"webhook:{channel_type}:{tenant_slug}:{client_ip(request)}",
+        max_requests=WEBHOOK_RATE_LIMIT_MAX,
+        window_seconds=WEBHOOK_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    tenant = db.query(Tenant).filter(Tenant.slug == tenant_slug, Tenant.status == "active").first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    channel = (
+        db.query(ChannelConfig)
+        .filter(ChannelConfig.tenant_id == tenant.id, ChannelConfig.channel_type == channel_type)
+        .first()
+    )
+    if not _meta_social_enabled(channel):
+        label = "Instagram" if channel_type == "instagram" else "Facebook Messenger"
+        raise HTTPException(status_code=403, detail=f"{label} channel is not enabled for this tenant")
+
+    creds = channel_service.credentials(channel)
+    configured_secret = creds.get("webhook_secret")
+    provided_secret = request.headers.get("X-Channel-Webhook-Secret")
+    if _configured_secret(configured_secret):
+        if provided_secret != configured_secret:
+            raise HTTPException(status_code=403, detail="Invalid social inbound secret")
+    elif not (settings.allow_unsigned_webhooks_in_dev and settings.app_env.lower() in WEBHOOK_DEV_ENVS):
+        raise HTTPException(status_code=403, detail="Social inbound secret is required")
+
+    normalized = meta_social_adapter.normalize_inbound_test(channel_type=channel_type, payload=payload.model_dump())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Sender id and message text are required")
+
+    synthetic_address = f"{tenant.id}:{normalized.sender_id}"
+    decision = orchestrator.handle_inbound(
+        db,
+        tenant=tenant,
+        customer_phone=synthetic_address,
+        text=normalized.text,
+        channel_type=channel_type,
+        provider_message_id=None,
+        payload_json={
+            **normalized.raw,
+            "tenant_slug": tenant.slug,
+        },
+    )
+
+    customer_identity = orchestrator.customer_identity
+    customer = customer_identity.lookup_customer(
+        db,
+        tenant_id=tenant.id,
+        channel_type=channel_type,
+        address=synthetic_address,
+    )
+    if customer and normalized.display_name and not customer.name:
+        customer.name = normalized.display_name
+        db.commit()
+
+    conversation = None
+    if customer:
+        conversation = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.customer_id == customer.id,
+                Conversation.channel_type == channel_type,
+            )
+            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+            .first()
+        )
+
+    outbound_message_id = decision.get("outbound_message_id")
+    reply = decision.get("auto_reply")
+    if not reply and isinstance(outbound_message_id, int):
+        reply = _latest_outbound_text(db, tenant_id=tenant.id, outbound_message_id=outbound_message_id)
+
+    state = conversation.state if conversation else decision.get("state")
+    handoff = bool(state == "HUMAN_HANDOFF" or decision.get("status") in {"handoff", "stored"})
+    return {
+        "conversation_id": str(conversation.id) if conversation else None,
+        "state": state,
+        "handoff": handoff,
+        "reply": reply,
+    }
+
+
+@router.post("/channels/instagram/{tenant_slug}/inbound-test")
+def receive_instagram_inbound_test(
+    tenant_slug: str,
+    payload: MetaSocialInboundTestRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    return _receive_meta_social_inbound_test("instagram", tenant_slug, payload, request, db)
+
+
+@router.post("/channels/facebook/{tenant_slug}/inbound-test")
+def receive_facebook_inbound_test(
+    tenant_slug: str,
+    payload: MetaSocialInboundTestRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    return _receive_meta_social_inbound_test("facebook", tenant_slug, payload, request, db)

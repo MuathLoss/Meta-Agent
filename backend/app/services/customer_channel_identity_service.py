@@ -10,6 +10,8 @@ class CustomerChannelIdentityService:
     TELEGRAM_PREFIX = "tg:"
     WEB_CHAT_PREFIX = "webchat:"
     EMAIL_PREFIX = "email:"
+    INSTAGRAM_PREFIX = "instagram:"
+    FACEBOOK_PREFIX = "facebook:"
 
     def _dedupe(self, tags: list[str]) -> list[str]:
         seen: set[str] = set()
@@ -33,6 +35,13 @@ class CustomerChannelIdentityService:
                 return tag[len(prefix):]
         return None
 
+    def _provider_identity_from_synthetic(self, raw_address: str) -> str:
+        text = str(raw_address)
+        tenant_part, separator, provider_part = text.partition(":")
+        if separator and tenant_part.isdigit() and provider_part:
+            return provider_part
+        return text
+
     def normalize_inbound_address(self, channel_type: str, address: str) -> str:
         raw = str(address).strip()
         if channel_type == "telegram":
@@ -42,6 +51,10 @@ class CustomerChannelIdentityService:
         if channel_type == "email":
             normalized_email = raw.lower()
             return normalized_email if normalized_email.startswith(self.EMAIL_PREFIX) else f"{self.EMAIL_PREFIX}{normalized_email}"
+        if channel_type == "instagram":
+            return raw if raw.startswith(self.INSTAGRAM_PREFIX) else f"{self.INSTAGRAM_PREFIX}{raw}"
+        if channel_type == "facebook":
+            return raw if raw.startswith(self.FACEBOOK_PREFIX) else f"{self.FACEBOOK_PREFIX}{raw}"
         return raw
 
     def lookup_customer(self, db: Session, *, tenant_id: int, channel_type: str, address: str) -> Customer | None:
@@ -58,6 +71,8 @@ class CustomerChannelIdentityService:
                 return by_email
             return db.query(Customer).filter(Customer.tenant_id == tenant_id, Customer.phone == normalized).first()
         if channel_type == "web_chat":
+            return db.query(Customer).filter(Customer.tenant_id == tenant_id, Customer.phone == normalized).first()
+        if channel_type in {"instagram", "facebook"}:
             return db.query(Customer).filter(Customer.tenant_id == tenant_id, Customer.phone == normalized).first()
         if channel_type == "telegram":
             raw = normalized[len(self.TELEGRAM_PREFIX):] if normalized.startswith(self.TELEGRAM_PREFIX) else normalized
@@ -88,6 +103,14 @@ class CustomerChannelIdentityService:
             customer.email = raw_email
             tags = list(customer.tags_json or [])
             tags = self._replace_prefixed_tag(tags, "channel:", "email")
+            customer.tags_json = tags
+            return
+        if channel_type in {"instagram", "facebook"}:
+            customer.phone = self.normalize_inbound_address(channel_type, raw_address)
+            provider_identity = self._provider_identity_from_synthetic(str(raw_address))
+            tags = list(customer.tags_json or [])
+            tags = self._replace_prefixed_tag(tags, "channel:", channel_type)
+            tags = self._replace_prefixed_tag(tags, f"{channel_type}_sender_id:", provider_identity)
             customer.tags_json = tags
             return
         if channel_type != "telegram":
@@ -126,6 +149,20 @@ class CustomerChannelIdentityService:
                 return tagged
             if customer.phone.startswith(self.WEB_CHAT_PREFIX):
                 return customer.phone[len(self.WEB_CHAT_PREFIX):]
+        if channel_type == "instagram":
+            tagged = self._tag_value(customer, "instagram_sender_id:")
+            if tagged:
+                return tagged
+            if customer.phone.startswith(self.INSTAGRAM_PREFIX):
+                return customer.phone[len(self.INSTAGRAM_PREFIX):]
+            return ""
+        if channel_type == "facebook":
+            tagged = self._tag_value(customer, "facebook_sender_id:")
+            if tagged:
+                return tagged
+            if customer.phone.startswith(self.FACEBOOK_PREFIX):
+                return customer.phone[len(self.FACEBOOK_PREFIX):]
+            return ""
         if channel_type == "telegram":
             tagged = self._tag_value(customer, "telegram_chat_id:")
             if tagged:
@@ -142,6 +179,16 @@ class CustomerChannelIdentityService:
             return f"web_chat:{web_chat_tagged}"
         if customer.phone.startswith(self.WEB_CHAT_PREFIX):
             return f"web_chat:{customer.phone[len(self.WEB_CHAT_PREFIX):]}"
+        instagram_tagged = self._tag_value(customer, "instagram_sender_id:")
+        if instagram_tagged:
+            return f"instagram:{instagram_tagged}"
+        if customer.phone.startswith(self.INSTAGRAM_PREFIX):
+            return f"instagram:{customer.phone[len(self.INSTAGRAM_PREFIX):]}"
+        facebook_tagged = self._tag_value(customer, "facebook_sender_id:")
+        if facebook_tagged:
+            return f"facebook:{facebook_tagged}"
+        if customer.phone.startswith(self.FACEBOOK_PREFIX):
+            return f"facebook:{customer.phone[len(self.FACEBOOK_PREFIX):]}"
         tagged = self._tag_value(customer, "telegram_chat_id:")
         if tagged:
             return f"telegram:{tagged}"

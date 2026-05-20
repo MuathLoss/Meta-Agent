@@ -14,6 +14,8 @@ class MetaSocialInboundMessage:
     sender_id: str
     text: str
     display_name: str | None
+    provider_message_id: str
+    account_id: str
     raw: dict[str, Any]
 
 
@@ -73,12 +75,60 @@ class MetaSocialAdapter:
             sender_id=sender_id,
             text=text,
             display_name=display_name,
+            provider_message_id=f"{channel_type}-test-{sender_id}",
+            account_id="inbound-test",
             raw={
                 "source": f"{channel_type}_inbound_test",
                 "sender_id": sender_id,
                 "display_name_provided": bool(display_name),
             },
         )
+
+    def normalize_webhook(self, *, channel_type: str, payload: dict[str, Any]) -> list[MetaSocialInboundMessage]:
+        if channel_type not in self.supported_channels:
+            return []
+        normalized: list[MetaSocialInboundMessage] = []
+        entries = payload.get("entry")
+        if not isinstance(entries, list):
+            return []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_id = str(entry.get("id") or "").strip()
+            messaging = entry.get("messaging")
+            if not isinstance(messaging, list):
+                continue
+            for event in messaging:
+                if not isinstance(event, dict):
+                    continue
+                message = event.get("message")
+                sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
+                recipient = event.get("recipient") if isinstance(event.get("recipient"), dict) else {}
+                if not isinstance(message, dict):
+                    continue
+                text = str(message.get("text") or "").strip()
+                mid = str(message.get("mid") or "").strip()
+                sender_id = self._safe_sender_id(sender.get("id"))
+                account_id = str(recipient.get("id") or entry_id).strip()
+                if not text or not sender_id or not account_id:
+                    continue
+                normalized.append(
+                    MetaSocialInboundMessage(
+                        sender_id=sender_id,
+                        text=text,
+                        display_name=None,
+                        provider_message_id=mid or f"{channel_type}-{account_id}-{sender_id}-{event.get('timestamp') or 'message'}",
+                        account_id=account_id,
+                        raw={
+                            "source": f"{channel_type}_webhook",
+                            "sender_id": sender_id,
+                            "account_id": account_id,
+                            "provider_message_id": mid or None,
+                            "has_attachments": bool(message.get("attachments")),
+                        },
+                    )
+                )
+        return normalized
 
     def send_text(
         self,

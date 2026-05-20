@@ -40,6 +40,16 @@ class EmailAdapter:
             return False, "invalid_smtp_port"
         return True, None
 
+    def imap_ready(self, credentials: dict[str, Any]) -> tuple[bool, str | None]:
+        required = ["imap_host", "imap_port", "imap_username", "imap_password"]
+        for key in required:
+            value = credentials.get(key)
+            if value is None or not str(value).strip() or str(value).strip().lower() == "pending":
+                return False, f"missing_{key}"
+        if self._port_value(credentials.get("imap_port")) is None:
+            return False, "invalid_imap_port"
+        return True, None
+
     def send_text(self, *, credentials: dict[str, Any], to_email: str, subject: str, text: str, timeout_seconds: float = 10.0) -> dict[str, Any]:
         ready, reason = self.smtp_ready(credentials)
         if not ready:

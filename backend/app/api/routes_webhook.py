@@ -129,6 +129,12 @@ def _allow_unsigned_whatsapp_webhook(signature_header: str | None) -> bool:
     return settings.allow_unsigned_webhooks_in_dev and settings.app_env.lower() in WEBHOOK_DEV_ENVS
 
 
+def _allow_unsigned_meta_webhook(signature_header: str | None) -> bool:
+    if signature_header:
+        return False
+    return settings.allow_unsigned_webhooks_in_dev and settings.app_env.lower() in WEBHOOK_DEV_ENVS
+
+
 def _resolve_channel_by_secret_token(db: Session, channel_type: str, secret_key: str, secret_value: str | None) -> ChannelConfig | None:
     if not secret_value:
         return None
@@ -175,6 +181,78 @@ def _resolve_channel_by_phone_number_id(db: Session, phone_number_id: str) -> Ch
         if public_config.get("phone_number_id") == phone_number_id or creds.get("phone_number_id") == phone_number_id:
             fallback_matches.append(row)
     return _exactly_one_channel(fallback_matches, provider="whatsapp", identifier_name="phone_number_id")
+
+
+def _resolve_meta_social_channel_by_account_id(db: Session, channel_type: str, account_id: str) -> ChannelConfig | None:
+    if channel_type not in {"instagram", "facebook"} or not account_id:
+        return None
+    indexed_matches = (
+        db.query(ChannelConfig)
+        .filter(
+            ChannelConfig.channel_type == channel_type,
+            ChannelConfig.provider_channel_id == account_id,
+        )
+        .all()
+    )
+    indexed_matches = [row for row in indexed_matches if _is_resolvable_channel(row)]
+    if indexed_matches:
+        return _exactly_one_channel(indexed_matches, provider=channel_type, identifier_name="provider_channel_id")
+
+    fallback_matches: list[ChannelConfig] = []
+    for row in db.query(ChannelConfig).filter(ChannelConfig.channel_type == channel_type).all():
+        if not _is_resolvable_channel(row):
+            continue
+        public_config = row.public_config_json or {}
+        creds = channel_service.credentials(row)
+        candidates = {
+            str(public_config.get("provider_channel_id") or ""),
+            str(public_config.get("provider_account_id") or ""),
+            str(public_config.get("page_id") or ""),
+            str(public_config.get("instagram_business_account_id") or ""),
+            str(creds.get("page_id") or ""),
+            str(creds.get("instagram_business_account_id") or ""),
+        }
+        if account_id in candidates:
+            fallback_matches.append(row)
+    return _exactly_one_channel(fallback_matches, provider=channel_type, identifier_name="account_id")
+
+
+def _process_meta_social_webhook_message(
+    db: Session,
+    *,
+    channel_type: str,
+    channel: ChannelConfig,
+    normalized,
+) -> dict:
+    stored_event_id = _stored_event_id(channel.tenant_id, normalized.provider_message_id)
+    if db.query(WebhookEvent).filter(WebhookEvent.tenant_id == channel.tenant_id, WebhookEvent.provider == channel_type, WebhookEvent.provider_event_id == stored_event_id).first():
+        return {"duplicate": True}
+
+    db.add(
+        WebhookEvent(
+            tenant_id=channel.tenant_id,
+            provider=channel_type,
+            provider_event_id=stored_event_id,
+            event_type="message",
+            payload_json=normalized.raw,
+        )
+    )
+    db.flush()
+    tenant = db.get(Tenant, channel.tenant_id)
+    if not tenant:
+        return {"ignored": "tenant_not_found"}
+
+    synthetic_address = f"{tenant.id}:{normalized.sender_id}"
+    decision = orchestrator.handle_inbound(
+        db,
+        tenant=tenant,
+        customer_phone=synthetic_address,
+        text=normalized.text,
+        channel_type=channel_type,
+        provider_message_id=normalized.provider_message_id,
+        payload_json=normalized.raw,
+    )
+    return {"decision": decision}
 
 
 @router.get("/channels/whatsapp/webhook")
@@ -248,6 +326,89 @@ async def receive(request: Request, db: Session = Depends(get_db)):
         payload_json=normalized.raw,
     )
     return {"ok": True, "decision": decision}
+
+
+@router.get("/channels/instagram/webhook")
+@router.get("/channels/facebook/webhook")
+def verify_meta_social(
+    request: Request,
+    hub_mode: str | None = Query(default=None, alias="hub.mode"),
+    hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
+    hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
+    db: Session = Depends(get_db),
+):
+    channel_type = request.url.path.split("/")[-2]
+    if channel_type not in {"instagram", "facebook"}:
+        raise HTTPException(status_code=404, detail="Unknown channel webhook")
+    if hub_mode != "subscribe" or not hub_verify_token:
+        return {"ok": False}
+    try:
+        row = _resolve_channel_by_secret_token(db, channel_type, "verify_token", hub_verify_token)
+    except AmbiguousChannelResolution:
+        return {"ok": False, "error": "ambiguous_channel"}
+    if row:
+        return int(hub_challenge) if hub_challenge and hub_challenge.isdigit() else hub_challenge
+    return {"ok": False}
+
+
+@router.post("/channels/instagram/webhook")
+@router.post("/channels/facebook/webhook")
+async def receive_meta_social(request: Request, db: Session = Depends(get_db)):
+    channel_type = request.url.path.split("/")[-2]
+    if channel_type not in {"instagram", "facebook"}:
+        raise HTTPException(status_code=404, detail="Unknown channel webhook")
+    enforce_rate_limit(
+        f"webhook:{channel_type}:{client_ip(request)}",
+        max_requests=WEBHOOK_RATE_LIMIT_MAX,
+        window_seconds=WEBHOOK_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except Exception:
+        return {"ok": True, "ignored": "invalid_json"}
+
+    normalized_messages = meta_social_adapter.normalize_webhook(channel_type=channel_type, payload=payload)
+    if not normalized_messages:
+        return {"ok": True, "ignored": "non_message_or_unrecognized_payload"}
+
+    signature_header = request.headers.get("X-Hub-Signature-256")
+    processed = 0
+    ignored = 0
+    duplicates = 0
+    for normalized in normalized_messages:
+        try:
+            channel = _resolve_meta_social_channel_by_account_id(db, channel_type, normalized.account_id)
+        except AmbiguousChannelResolution:
+            ignored += 1
+            continue
+        if not channel:
+            ignored += 1
+            continue
+
+        creds = channel_service.credentials(channel)
+        app_secret = creds.get("app_secret")
+        if not _configured_secret(app_secret):
+            if not _allow_unsigned_meta_webhook(signature_header):
+                raise HTTPException(status_code=403, detail="Meta webhook app secret is not configured")
+        elif not meta_social_adapter.valid_signature(raw_body=raw_body, signature_header=signature_header, app_secret=app_secret):
+            if not _allow_unsigned_meta_webhook(signature_header):
+                raise HTTPException(status_code=403, detail="Invalid Meta webhook signature")
+
+        result = _process_meta_social_webhook_message(
+            db,
+            channel_type=channel_type,
+            channel=channel,
+            normalized=normalized,
+        )
+        if result.get("duplicate"):
+            duplicates += 1
+        elif result.get("ignored"):
+            ignored += 1
+        else:
+            processed += 1
+
+    return {"ok": True, "processed": processed, "duplicates": duplicates, "ignored": ignored}
 
 
 async def _receive_telegram(request: Request, db: Session, bot_token: str | None = None):

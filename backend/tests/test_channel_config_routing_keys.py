@@ -72,6 +72,84 @@ def test_duplicate_provider_channel_id_same_channel_type_is_blocked(db, tenant):
     assert first.provider_channel_id == "phone-duplicate"
 
 
+def test_same_channel_type_can_be_configured_separately_for_two_tenants(db, tenant):
+    service = TenantChannelService()
+    first = service.upsert(
+        db,
+        tenant.id,
+        "whatsapp",
+        "connected",
+        {"enabled": True, "live_send_enabled": True, "phone_number_id": "phone-tenant-one", "waba_id": "waba-one"},
+        {"access_token": "tenant-one-token", "phone_number_id": "phone-tenant-one"},
+    )
+    other = Tenant(slug="other-channel-config", display_name="Other", timezone="Asia/Riyadh", default_lang="ar", status="active")
+    db.add(other)
+    db.flush()
+    second = service.upsert(
+        db,
+        other.id,
+        "whatsapp",
+        "configured",
+        {"enabled": False, "live_send_enabled": False, "phone_number_id": "phone-tenant-two", "waba_id": "waba-two"},
+        {"access_token": "tenant-two-token", "phone_number_id": "phone-tenant-two"},
+    )
+    db.commit()
+
+    assert first.tenant_id == tenant.id
+    assert second.tenant_id == other.id
+    assert first.id != second.id
+    assert first.channel_type == second.channel_type == "whatsapp"
+    assert first.provider_channel_id == "phone-tenant-one"
+    assert second.provider_channel_id == "phone-tenant-two"
+    assert first.public_config_json["enabled"] is True
+    assert second.public_config_json["enabled"] is False
+    assert service.credentials(first)["access_token"] == "tenant-one-token"
+    assert service.credentials(second)["access_token"] == "tenant-two-token"
+
+
+def test_updating_one_tenant_channel_does_not_affect_another_tenant(db, tenant):
+    service = TenantChannelService()
+    other = Tenant(slug="other-channel-update", display_name="Other", timezone="Asia/Riyadh", default_lang="ar", status="active")
+    db.add(other)
+    db.flush()
+    service.upsert(
+        db,
+        tenant.id,
+        "telegram",
+        "configured",
+        {"enabled": True, "live_send_enabled": False, "provider_display_name": "Tenant one"},
+        {"bot_token": "tenant-one-token"},
+    )
+    other_row = service.upsert(
+        db,
+        other.id,
+        "telegram",
+        "configured",
+        {"enabled": False, "live_send_enabled": False, "provider_display_name": "Tenant two"},
+        {"bot_token": "tenant-two-token"},
+    )
+    db.commit()
+
+    response = routes_channels.update(
+        "telegram",
+        ChannelConfigRequest(
+            status="connected",
+            public_config={"enabled": True, "live_send_enabled": True, "provider_display_name": "Tenant one updated"},
+            credentials={"bot_token": "tenant-one-updated-token"},
+        ),
+        db=db,
+        tenant=tenant,
+        _={},
+    ).model_dump()
+    db.commit()
+    db.refresh(other_row)
+
+    assert response["public_config"]["provider_display_name"] == "Tenant one updated"
+    assert other_row.tenant_id == other.id
+    assert other_row.public_config_json == {"enabled": False, "live_send_enabled": False, "provider_display_name": "Tenant two"}
+    assert service.credentials(other_row)["bot_token"] == "tenant-two-token"
+
+
 def test_channel_config_response_does_not_expose_encrypted_credentials(db, tenant):
     row = (
         db.query(ChannelConfig)

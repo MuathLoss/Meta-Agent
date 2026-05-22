@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   api,
@@ -717,9 +717,10 @@ function Inbox({ rows, selectedConversationId, conversation, openConversation, h
     setReplyError(null);
   }, [conversation?.conversation.id]);
 
-  useEffect(() => {
-    if (!scrollRef.current) return;
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  useLayoutEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: 'auto' });
   }, [conversation?.messages.length, conversation?.conversation.id]);
 
   async function submitReply() {

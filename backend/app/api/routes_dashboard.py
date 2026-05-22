@@ -24,6 +24,7 @@ customer_identity = CustomerChannelIdentityService()
 ROLES = (ROLE_BUSINESS_ADMIN, ROLE_OPERATIONS_STAFF, ROLE_FINANCE, ROLE_CERTIFICATES, ROLE_SUPERVISOR)
 PREVIEW_RATE_LIMIT_MAX = 60
 PREVIEW_RATE_LIMIT_WINDOW_SECONDS = 60
+TEST_CONSOLE_CHANNELS = ("telegram", "web_chat", "whatsapp", "email", "instagram", "facebook")
 
 
 class PreviewInboundRequest(BaseModel):
@@ -34,6 +35,18 @@ class PreviewInboundRequest(BaseModel):
 
 def last_message_for(db: Session, tenant_id: int, conversation_id: int) -> Message | None:
     return db.query(Message).filter(Message.tenant_id == tenant_id, Message.conversation_id == conversation_id).order_by(Message.created_at.desc()).first()
+
+
+def without_test_console_customers(query, tenant_id: int):
+    for channel in TEST_CONSOLE_CHANNELS:
+        query = query.filter(~Customer.phone.ilike(f"%test:{tenant_id}:{channel}:%"))
+    return query
+
+
+def is_test_console_customer(customer: Customer, tenant_id: int) -> bool:
+    markers = [f"test:{tenant_id}:{channel}:" for channel in TEST_CONSOLE_CHANNELS]
+    values = [str(customer.phone or ""), *(str(tag) for tag in (customer.tags_json or []))]
+    return any(marker in value for value in values for marker in markers)
 
 
 @router.get("/inbox")
@@ -55,6 +68,7 @@ def inbox(
         )
         .filter(Conversation.tenant_id == tenant.id, Customer.tenant_id == tenant.id)
     )
+    q = without_test_console_customers(q, tenant.id)
     if state:
         q = q.filter(Conversation.state == state)
     if owner_ref:
@@ -63,6 +77,8 @@ def inbox(
     data = []
     seen_keys: set[tuple[int, str]] = set()
     for conv, customer in rows:
+        if is_test_console_customer(customer, tenant.id):
+            continue
         key = (customer.id, conv.channel_type)
         if key in seen_keys:
             continue
@@ -108,6 +124,8 @@ def detail(conversation_id: int, db: Session = Depends(get_db), tenant: Tenant =
     if not row:
         raise HTTPException(status_code=404, detail="Conversation not found")
     c, customer = row
+    if is_test_console_customer(customer, tenant.id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     msgs = db.query(Message).filter(Message.tenant_id == tenant.id, Message.conversation_id == c.id).order_by(Message.created_at).all()
     return {
         "conversation": {"id": c.id, "state": c.state, "channel_type": c.channel_type, "owner_type": c.owner_type, "owner_ref": c.owner_ref, "last_intent": c.last_intent, "metadata_json": c.metadata_json or {}},
@@ -119,16 +137,36 @@ def detail(conversation_id: int, db: Session = Depends(get_db), tenant: Tenant =
 @router.get("/customers")
 def customers(search: str | None = Query(default=None), db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(*ROLES))):
     q = db.query(Customer).filter(Customer.tenant_id == tenant.id)
+    q = without_test_console_customers(q, tenant.id)
     if search:
         pattern = f"%{search}%"
         q = q.filter((Customer.phone.ilike(pattern)) | (Customer.name.ilike(pattern)))
     rows = q.order_by(Customer.created_at.desc()).limit(100).all()
+    rows = [r for r in rows if not is_test_console_customer(r, tenant.id)]
     return [{"id": r.id, "phone": customer_identity.display_identity(r), "name": r.name, "email": r.email, "preferred_lang": r.preferred_lang, "tags_json": r.tags_json or [], "opt_in": r.opt_in} for r in rows]
 
 
 @router.get("/tickets")
 def tickets(status: str | None = Query(default=None), db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(*ROLES))):
-    q = db.query(Ticket).filter(Ticket.tenant_id == tenant.id)
+    q = (
+        db.query(Ticket)
+        .join(
+            Conversation,
+            and_(
+                Conversation.id == Ticket.conversation_id,
+                Conversation.tenant_id == Ticket.tenant_id,
+            ),
+        )
+        .join(
+            Customer,
+            and_(
+                Customer.id == Conversation.customer_id,
+                Customer.tenant_id == Conversation.tenant_id,
+            ),
+        )
+        .filter(Ticket.tenant_id == tenant.id, Customer.tenant_id == tenant.id)
+    )
+    q = without_test_console_customers(q, tenant.id)
     if status:
         q = q.filter(Ticket.status == status)
     rows = q.order_by(Ticket.created_at.desc()).limit(100).all()

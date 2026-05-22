@@ -1,6 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
+from app.api import routes_dashboard
 from app.api import routes_channels
 from app.core.security import hash_password
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, require_tenant_roles
@@ -176,3 +177,52 @@ def test_channel_test_console_handoff_state_is_returned(db, tenant):
     assert result.reply is None
     assert result.handoff is True
     assert result.state == "HUMAN_HANDOFF"
+
+
+def test_legacy_test_console_conversations_are_hidden_from_dashboard(db, tenant):
+    real_customer = Customer(tenant_id=tenant.id, phone="0500000099", name="Real Customer")
+    synthetic_customer = Customer(
+        tenant_id=tenant.id,
+        phone=f"tg:test:{tenant.id}:telegram:test_legacy-session",
+        tags_json=[
+            "channel:telegram",
+            f"telegram_chat_id:test:{tenant.id}:telegram:test_legacy-session",
+        ],
+    )
+    db.add_all([real_customer, synthetic_customer])
+    db.flush()
+
+    real_conversation = Conversation(
+        tenant_id=tenant.id,
+        customer_id=real_customer.id,
+        channel_type="whatsapp",
+        state="BOT_ACTIVE",
+        owner_type="BOT",
+        owner_ref="BOT",
+    )
+    synthetic_conversation = Conversation(
+        tenant_id=tenant.id,
+        customer_id=synthetic_customer.id,
+        channel_type="telegram",
+        state="BOT_ACTIVE",
+        owner_type="BOT",
+        owner_ref="BOT",
+    )
+    db.add_all([real_conversation, synthetic_conversation])
+    db.flush()
+    db.add_all(
+        [
+            Message(tenant_id=tenant.id, conversation_id=real_conversation.id, direction="inbound", text="hello"),
+            Message(tenant_id=tenant.id, conversation_id=synthetic_conversation.id, direction="inbound", text="fake test hello"),
+        ]
+    )
+    db.commit()
+
+    inbox_rows = routes_dashboard.inbox(state=None, owner_ref=None, db=db, tenant=tenant, _={})
+    customer_rows = routes_dashboard.customers(search=None, db=db, tenant=tenant, _={})
+
+    assert [row["id"] for row in inbox_rows] == [real_conversation.id]
+    assert [row["id"] for row in customer_rows] == [real_customer.id]
+    with pytest.raises(HTTPException) as exc:
+        routes_dashboard.detail(conversation_id=synthetic_conversation.id, db=db, tenant=tenant, _={})
+    assert exc.value.status_code == 404

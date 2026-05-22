@@ -1653,6 +1653,7 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
   const [editingItem, setEditingItem] = useState<KnowledgeItem | null>(null);
   const [pendingArchive, setPendingArchive] = useState<KnowledgeItem | null>(null);
   const [pendingDelete, setPendingDelete] = useState<KnowledgeItem | null>(null);
+  const [smartImportOpen, setSmartImportOpen] = useState(false);
   const [form, setForm] = useState<KnowledgeFormState>(createDefaultKnowledgeForm);
 
   function openCreate() {
@@ -1935,7 +1936,21 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
     archived: items.filter((item) => item.status === 'archived').length,
   };
 
-  return <section className={`knowledge-shell ${wizardOpen ? 'modal-open' : ''}`}>
+  useEffect(() => {
+    if (!smartImportOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setSmartImportOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [smartImportOpen]);
+
+  return <section className={`knowledge-shell ${(wizardOpen || smartImportOpen) ? 'modal-open' : ''}`}>
     <div className="knowledge-topbar knowledge-premium-topbar">
       <div className="knowledge-title-block">
         <p className="eyebrow">Tenant knowledge base</p>
@@ -1948,7 +1963,13 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
           <div><small>Inactive</small><strong>{knowledgeCounts.inactive}</strong></div>
           <div><small>Archived</small><strong>{knowledgeCounts.archived}</strong></div>
         </div>
-        <button onClick={openCreate}>Add new bot response</button>
+        <div className="knowledge-action-stack">
+          <div className="knowledge-primary-actions">
+            <button onClick={openCreate}>Make new response</button>
+            <button type="button" className="secondary knowledge-import-trigger" onClick={() => setSmartImportOpen(true)}>Upload your messages</button>
+          </div>
+          <p className="muted">Paste chats or upload files to generate drafts.</p>
+        </div>
       </div>
     </div>
 
@@ -1963,8 +1984,6 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
         </button>)}
       </div>
     </div>
-
-    <SmartImportStudio token={token} tenantSlug={tenantSlug} reload={reload} />
 
     <div className="knowledge-cards-grid">
       {items.length === 0 && <div className="card knowledge-empty-state"><strong>No approved answers yet</strong><p className="muted">Add the first response to teach the assistant how to answer a real customer question.</p></div>}
@@ -2213,6 +2232,25 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
       </div>
     </div>}
 
+    {smartImportOpen && typeof document !== 'undefined' && createPortal(
+      <div className="smart-import-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="smart-import-title" onMouseDown={(event) => {
+        if (event.target === event.currentTarget) setSmartImportOpen(false);
+      }}>
+        <div className="smart-import-modal-window">
+          <div className="smart-import-modal-head">
+            <div>
+              <p className="eyebrow">Smart import</p>
+              <h3 id="smart-import-title">Upload your messages</h3>
+              <p>Paste WhatsApp exports or upload TXT, CSV, or XLSX files. Nothing is saved until you approve.</p>
+            </div>
+            <button type="button" className="secondary knowledge-close-button" onClick={() => setSmartImportOpen(false)}>Close</button>
+          </div>
+          <SmartImportStudio token={token} tenantSlug={tenantSlug} reload={reload} />
+        </div>
+      </div>,
+      document.body
+    )}
+
     {pendingArchive && <div className="confirm-overlay" role="dialog" aria-modal="true">
       <div className="confirm-card">
         <h3>Archive this bot response?</h3>
@@ -2339,18 +2377,24 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
     }
   }
 
-  return <section className="card smart-import-studio">
+  return <section className="smart-import-studio">
     <div className="smart-import-head">
       <div>
-        <p className="eyebrow">Smart Import Studio</p>
-        <h3>Turn messy customer messages into reviewable drafts</h3>
-        <p className="muted">Paste WhatsApp exports or upload TXT, CSV, or XLSX files. Nothing is saved until you approve selected suggestions.</p>
+        <p className="eyebrow">Guided import flow</p>
+        <h3>Turn customer messages into reviewable drafts</h3>
+        <p className="muted">Preview first, approve only the useful suggestions, then import them into Knowledge & Responses.</p>
       </div>
       <div className="smart-import-summary">
         <div><span>Previewed</span><strong>{rows.length}</strong></div>
         <div><span>Approved</span><strong>{approvedCount}</strong></div>
         <div><span>Rejected</span><strong>{rejectedCount}</strong></div>
       </div>
+    </div>
+
+    <div className="smart-import-flow-steps" aria-label="Smart import workflow">
+      <div className="active"><span>1</span><strong>Paste or upload</strong><small>Add exported chats or files</small></div>
+      <div className={preview ? 'active' : ''}><span>2</span><strong>Preview suggestions</strong><small>Review confidence and warnings</small></div>
+      <div className={approvedCount > 0 ? 'active' : ''}><span>3</span><strong>Approve and import</strong><small>Save only selected drafts</small></div>
     </div>
 
     <div className="smart-import-input-grid">
@@ -2388,8 +2432,9 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
     </div>
 
     {rows.length === 0 && <div className="smart-import-empty">
-      <strong>Preview suggestions will appear here</strong>
-      <p className="muted">The studio redacts emails, phone numbers, and URLs, then suggests training examples, keywords, and FAQ drafts for approval.</p>
+      <span className="smart-import-empty-icon">1</span>
+      <strong>Start with a paste or file preview</strong>
+      <p className="muted">The studio redacts emails, phone numbers, and URLs, then suggests training examples, keywords, and FAQ drafts for approval. Nothing is saved until you confirm the import.</p>
     </div>}
 
     {rows.length > 0 && <div className="smart-import-list">

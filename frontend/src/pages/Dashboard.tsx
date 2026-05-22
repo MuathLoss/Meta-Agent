@@ -2005,6 +2005,19 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
           <span>{item.responseMode === 'business_settings' ? 'Settings answer' : item.responseMode === 'custom' ? 'Custom answer' : 'FAQ answer'}</span>
           <span>{item.faq ? `FAQ #${item.faq.id}` : 'No FAQ record'}</span>
         </div>
+        <details className="knowledge-training-panel">
+          <summary>Training & keywords</summary>
+          <div className="knowledge-training-grid">
+            <div>
+              <small>Arabic</small>
+              {item.promptsAr.length > 0 ? <div className="chip-cloud">{item.promptsAr.slice(0, 8).map((phrase) => <span key={phrase} className="config-chip">{phrase}</span>)}</div> : <p className="muted">No Arabic keywords yet.</p>}
+            </div>
+            <div>
+              <small>English</small>
+              {item.promptsEn.length > 0 ? <div className="chip-cloud">{item.promptsEn.slice(0, 8).map((phrase) => <span key={phrase} className="config-chip secondary-chip">{phrase}</span>)}</div> : <p className="muted">No English keywords yet.</p>}
+            </div>
+          </div>
+        </details>
         <div className="knowledge-summary-grid">
           <div>
             <small>What might customers ask?</small>
@@ -2245,7 +2258,7 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
             </div>
             <button type="button" className="secondary knowledge-close-button" onClick={() => setSmartImportOpen(false)}>Close</button>
           </div>
-          <SmartImportStudio token={token} tenantSlug={tenantSlug} reload={reload} />
+          <SmartImportStudio token={token} tenantSlug={tenantSlug} reload={reload} intents={intents} />
         </div>
       </div>,
       document.body
@@ -2277,18 +2290,32 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
   </section>;
 }
 
-function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenantSlug: string; reload: () => Promise<void> }) {
+type SmartImportFilter = 'all' | 'high' | 'review';
+
+function isHighConfidenceSmartRow(row: SmartImportRow) {
+  return row.confidence >= 0.8 && !row.warnings.includes('needs_review');
+}
+
+function SmartImportStudio({ token, tenantSlug, reload, intents }: { token: string; tenantSlug: string; reload: () => Promise<void>; intents: IntentItem[] }) {
   const [pasteText, setPasteText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<SmartImportPreview | null>(null);
   const [rows, setRows] = useState<SmartImportRow[]>([]);
+  const [confidenceFilter, setConfidenceFilter] = useState<SmartImportFilter>('all');
   const [loading, setLoading] = useState(false);
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
   const approvedCount = rows.filter((row) => row.decision === 'approved').length;
   const rejectedCount = rows.filter((row) => row.decision === 'rejected').length;
-  const highConfidenceCount = rows.filter((row) => row.confidence >= 0.8 && !row.warnings.includes('needs_review')).length;
+  const highConfidenceCount = rows.filter((row) => isHighConfidenceSmartRow(row)).length;
+  const needsReviewCount = rows.filter((row) => !isHighConfidenceSmartRow(row)).length;
+  const existingIntentCodes = useMemo(() => new Set(intents.map((intent) => intent.code)), [intents]);
+  const visibleRows = rows.filter((row) => {
+    if (confidenceFilter === 'high') return isHighConfidenceSmartRow(row);
+    if (confidenceFilter === 'review') return !isHighConfidenceSmartRow(row);
+    return true;
+  });
 
   async function runPreview(mode: 'paste' | 'file') {
     setLoading(true);
@@ -2306,6 +2333,7 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
       }
       setPreview(next);
       setRows(next.rows);
+      setConfidenceFilter('all');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to preview import.');
     } finally {
@@ -2321,14 +2349,6 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
     setRows((current) => current.map((row) => row.row_id === rowId ? { ...row, editable: { ...row.editable, ...patch } } : row));
   }
 
-  function approveHighConfidence() {
-    setRows((current) => current.map((row) => row.confidence >= 0.8 && !row.warnings.includes('needs_review') ? { ...row, decision: 'approved' } : row));
-  }
-
-  function rejectLowConfidence() {
-    setRows((current) => current.map((row) => row.confidence < 0.6 || row.warnings.includes('needs_review') ? { ...row, decision: 'rejected' } : row));
-  }
-
   function resetImport() {
     setPreview(null);
     setRows([]);
@@ -2336,6 +2356,7 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
     setFile(null);
     setError(null);
     setResultMessage(null);
+    setConfidenceFilter('all');
   }
 
   async function confirmImport() {
@@ -2346,16 +2367,18 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
       const items = rows.map((row) => {
         const answer = row.editable.faq_answer.trim();
         const answerIsArabic = /[\u0600-\u06FF]/.test(answer);
+        const correctedIntent = intents.find((intent) => intent.code === row.editable.intent_code);
         return {
           row_id: row.row_id,
           decision: row.decision,
           redacted_excerpt: row.redacted_excerpt,
           normalized_text: row.normalized_text,
           intent_code: row.editable.intent_code,
-          intent_label: row.suggested_intent.label,
+          intent_label: correctedIntent?.label || row.editable.intent_code.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase()),
           create_intent: row.editable.create_intent,
           training_example_text: row.editable.training_example_text,
           keyword_phrases: row.editable.keyword_phrases,
+          routing_behavior: row.editable.routing_behavior,
           create_faq: row.editable.create_faq,
           faq_topic_key: row.editable.faq_topic_key,
           faq_question: row.editable.faq_question,
@@ -2368,7 +2391,8 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
         total_rows: preview?.total_rows || rows.length,
         items,
       });
-      setResultMessage(`Imported ${result.approved_training_examples} training examples, ${result.approved_keywords} keywords, and ${result.approved_faq_items} FAQ items.`);
+      const duplicateSummary = preview?.duplicate_rows ? ` ${preview.duplicate_rows} duplicate rows were skipped during preview.` : '';
+      setResultMessage(`Saved ${result.approved_training_examples} training examples, ${result.approved_keywords} keywords, ${result.approved_faq_items} FAQ items, and ${result.approved_intents} intents. ${result.skipped_rows} rows skipped.${duplicateSummary}`);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to confirm import.');
@@ -2423,9 +2447,14 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
         <strong>{preview ? `${preview.previewed_rows} suggestions ready` : 'No preview yet'}</strong>
         <p className="muted">{preview ? `${preview.duplicate_rows} duplicates skipped from ${preview.total_rows} parsed rows. Preview cap: ${preview.max_rows}.` : 'Preview creates redacted drafts for admin review.'}</p>
       </div>
-      <div className="button-row">
-        <button type="button" className="secondary" onClick={approveHighConfidence} disabled={rows.length === 0}>Approve high confidence ({highConfidenceCount})</button>
-        <button type="button" className="secondary" onClick={rejectLowConfidence} disabled={rows.length === 0}>Reject low confidence</button>
+      <div className="smart-import-action-panel">
+        <div className="smart-import-filter-tabs" aria-label="Filter smart import suggestions">
+          {([
+            ['all', `All (${rows.length})`],
+            ['high', `High confidence (${highConfidenceCount})`],
+            ['review', `Needs review (${needsReviewCount})`],
+          ] as Array<[SmartImportFilter, string]>).map(([filter, label]) => <button key={filter} type="button" className={confidenceFilter === filter ? 'active' : ''} onClick={() => setConfidenceFilter(filter)} disabled={rows.length === 0}>{label}</button>)}
+        </div>
         <button type="button" className="secondary" onClick={resetImport} disabled={loading || approving || (!preview && !pasteText && !file)}>Clear</button>
         <button type="button" onClick={() => void confirmImport()} disabled={approving || approvedCount === 0}>{approving ? 'Importing...' : 'Confirm import'}</button>
       </div>
@@ -2437,16 +2466,26 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
       <p className="muted">The studio redacts emails, phone numbers, and URLs, then suggests training examples, keywords, and FAQ drafts for approval. Nothing is saved until you confirm the import.</p>
     </div>}
 
-    {rows.length > 0 && <div className="smart-import-list">
-      {rows.map((row) => <article className={`smart-import-row decision-${row.decision}`} key={row.row_id}>
+    {rows.length > 0 && visibleRows.length === 0 && <div className="smart-import-empty compact">
+      <strong>No suggestions in this view</strong>
+      <p className="muted">Switch filters to review the remaining suggestions.</p>
+    </div>}
+
+    {visibleRows.length > 0 && <div className="smart-import-list">
+      {visibleRows.map((row) => {
+        const correctedIntentExists = existingIntentCodes.has(row.editable.intent_code);
+        const protectedIntent = row.warnings.includes('protected_handoff_intent') || ['COMPLAINT', 'HUMAN_REQUEST'].includes(row.suggested_intent.code);
+        const sensitiveIntent = !protectedIntent && ['PAYMENT_TRANSFER', 'CERTIFICATES'].includes(row.suggested_intent.code);
+        return <article className={`smart-import-row decision-${row.decision}`} key={row.row_id}>
         <div className="smart-import-row-main">
           <div>
             <div className="smart-import-row-top">
               <span className="config-badge">{row.detected_language.toUpperCase()}</span>
               <span className={`smart-confidence ${row.confidence >= 0.8 ? 'high' : row.confidence >= 0.6 ? 'medium' : 'low'}`}>{Math.round(row.confidence * 100)}%</span>
-              <span className="config-badge secondary-pill">{row.suggested_intent.code}</span>
-              {!row.suggested_intent.existing && <span className="config-status-pill inactive">new intent candidate</span>}
+              <span className="config-badge secondary-pill">{row.editable.intent_code || row.suggested_intent.code}</span>
+              {correctedIntentExists ? <span className="config-status-pill active">Existing intent</span> : <span className="config-status-pill inactive">New intent candidate</span>}
             </div>
+            <p className="smart-import-intent-note">{correctedIntentExists ? 'This will improve the existing intent with new examples and keywords.' : 'This can create a new intent only if you keep the checkbox enabled.'}</p>
             <p className="smart-import-excerpt" dir="auto">{row.redacted_excerpt}</p>
             <p className="smart-import-normalized" dir="auto">{row.normalized_text}</p>
           </div>
@@ -2457,6 +2496,19 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
         </div>
 
         <div className="smart-import-detail-grid">
+          <label>Existing intent
+            <select value={correctedIntentExists ? row.editable.intent_code : ''} onChange={(e) => {
+              const nextIntent = intents.find((intent) => intent.code === e.target.value);
+              updateEditable(row.row_id, {
+                intent_code: e.target.value,
+                faq_topic_key: nextIntent?.default_response_topic_key || row.editable.faq_topic_key,
+                create_intent: false,
+              });
+            }}>
+              <option value="">Custom / new intent</option>
+              {intents.map((intent) => <option key={intent.id} value={intent.code}>{intent.code} - {intent.label}</option>)}
+            </select>
+          </label>
           <label>Intent code
             <input value={row.editable.intent_code} onChange={(e) => updateEditable(row.row_id, { intent_code: normalizeIntentCode(e.target.value) })} />
           </label>
@@ -2469,10 +2521,17 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
           <label>FAQ topic
             <input value={row.editable.faq_topic_key} onChange={(e) => updateEditable(row.row_id, { faq_topic_key: normalizeTopicKey(e.target.value) })} placeholder="pricing" />
           </label>
+          <label>Handoff behavior
+            <select value={protectedIntent ? 'immediate_handoff' : row.editable.routing_behavior} onChange={(e) => updateEditable(row.row_id, { routing_behavior: e.target.value })} disabled={protectedIntent}>
+              <option value="normal">Bot can answer normally</option>
+              <option value="offer_handoff">Offer handoff</option>
+              <option value="immediate_handoff">Immediate handoff</option>
+            </select>
+          </label>
         </div>
 
         <div className="smart-import-options">
-          <label className="check-row"><input type="checkbox" checked={row.editable.create_intent} onChange={(e) => updateEditable(row.row_id, { create_intent: e.target.checked })} disabled={row.suggested_intent.existing} /> Create new intent if missing</label>
+          <label className="check-row"><input type="checkbox" checked={row.editable.create_intent} onChange={(e) => updateEditable(row.row_id, { create_intent: e.target.checked })} disabled={correctedIntentExists} /> Create new intent if missing</label>
           <label className="check-row"><input type="checkbox" checked={row.editable.create_faq} onChange={(e) => updateEditable(row.row_id, { create_faq: e.target.checked })} /> Create FAQ item with approved answer</label>
           {row.editable.create_faq && <label className="smart-import-answer">Official answer
             <textarea value={row.editable.faq_answer} onChange={(e) => updateEditable(row.row_id, { faq_answer: e.target.value })} placeholder="Needs official answer" />
@@ -2481,12 +2540,15 @@ function SmartImportStudio({ token, tenantSlug, reload }: { token: string; tenan
 
         <div className="smart-import-meta">
           <span>{row.suggested_faq_topic?.existing ? `Links to FAQ: ${row.suggested_faq_topic.topic_key}` : row.suggested_faq_topic ? `FAQ draft: ${row.suggested_faq_topic.topic_key}` : 'No FAQ suggestion'}</span>
-          <span>{row.routing_hint.behavior} · {row.routing_hint.reason}</span>
+          <span>{protectedIntent ? 'immediate_handoff' : row.editable.routing_behavior} · {row.routing_hint.reason}</span>
         </div>
+        {protectedIntent && <div className="smart-import-safety-note">Protected handoff intent. Complaint and explicit human-request imports stay immediate handoff.</div>}
+        {sensitiveIntent && <div className="smart-import-safety-note warning">Sensitive topic. You can edit the suggested behavior, but this import will not change routing rules automatically.</div>}
         {row.warnings.length > 0 && <div className="chip-cloud">
           {row.warnings.map((warning) => <span key={warning} className="config-chip secondary-chip">{warning}</span>)}
         </div>}
-      </article>)}
+      </article>;
+      })}
     </div>}
   </section>;
 }

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.routes_imports import SmartImportApproveItem, SmartImportApproveRequest, SmartPreviewTextRequest, approve_import
-from app.models.entities import AuditLog, FaqItem, IntentKeyword, Tenant, TrainingExample
+from app.models.entities import AuditLog, FaqItem, IntentDefinition, IntentKeyword, RoutingRule, Tenant, TrainingExample
 from app.services.smart_import_service import SmartImportService
 
 
@@ -77,6 +77,42 @@ def test_preview_rejects_tenant_id_in_text_payload():
         SmartPreviewTextRequest(text="hello", tenant_id=123)  # type: ignore
 
 
+def test_step_course_message_maps_to_step_prep_not_pricing(db, tenant):
+    result = SmartImportService().preview_text(db, tenant=tenant, text="عندكم دورة اختبار ستيب؟", source_type="paste")
+
+    row = result["rows"][0]
+    assert row["suggested_intent"]["code"] == "STEP_PREP"
+    assert row["suggested_intent"]["existing"] is False
+    assert "PRICING" != row["suggested_intent"]["code"]
+    assert "كم" not in row["suggested_keywords"]
+
+
+def test_pricing_requires_real_pricing_words(db, tenant):
+    service = SmartImportService()
+
+    course_result = service.preview_text(db, tenant=tenant, text="عندكم دورة لغة؟", source_type="paste")
+    price_result = service.preview_text(db, tenant=tenant, text="كم السعر؟", source_type="paste")
+
+    assert course_result["rows"][0]["suggested_intent"]["code"] != "PRICING"
+    assert price_result["rows"][0]["suggested_intent"]["code"] == "PRICING"
+
+
+def test_weak_keywords_are_not_suggested(db, tenant):
+    result = SmartImportService().preview_text(db, tenant=tenant, text="كم", source_type="paste")
+
+    assert result["rows"][0]["suggested_keywords"] == []
+
+
+def test_existing_intent_is_marked_existing_for_smart_import(db, tenant):
+    db.add(IntentDefinition(tenant_id=tenant.id, code="STEP_PREP", label="STEP prep", enabled=True, default_response_topic_key="step_prep"))
+    db.commit()
+
+    result = SmartImportService().preview_text(db, tenant=tenant, text="عندكم دورة اختبار ستيب؟", source_type="paste")
+
+    assert result["rows"][0]["suggested_intent"]["code"] == "STEP_PREP"
+    assert result["rows"][0]["suggested_intent"]["existing"] is True
+
+
 def test_approval_writes_only_selected_rows_and_stays_tenant_scoped(db, tenant):
     other = Tenant(slug="other-smart-import", display_name="Other", timezone="Asia/Riyadh", default_lang="en", status="active")
     db.add(other)
@@ -112,6 +148,76 @@ def test_approval_writes_only_selected_rows_and_stays_tenant_scoped(db, tenant):
     assert db.query(TrainingExample).filter(TrainingExample.tenant_id == other.id).count() == 0
     assert db.query(IntentKeyword).filter(IntentKeyword.tenant_id == tenant.id, IntentKeyword.phrase == "price question").count() == 1
     assert db.query(FaqItem).filter(FaqItem.tenant_id == tenant.id, FaqItem.topic_key == "pricing_followup").count() == 1
+
+
+def test_corrected_intent_approval_saves_to_corrected_intent(db, tenant):
+    db.add(IntentDefinition(tenant_id=tenant.id, code="STEP_PREP", label="STEP prep", enabled=True, default_response_topic_key="step_prep"))
+    db.commit()
+
+    payload = SmartImportApproveRequest(
+        source_type="paste",
+        total_rows=1,
+        items=[
+            SmartImportApproveItem(
+                row_id="row_1",
+                decision="approved",
+                redacted_excerpt="عندكم دورة اختبار ستيب؟",
+                training_example_text="عندكم دورة اختبار ستيب؟",
+                intent_code="STEP_PREP",
+                keyword_phrases=["اختبار ستيب"],
+            )
+        ],
+    )
+
+    result = approve_import(payload, tenant=tenant, db=db, ctx={"user": type("User", (), {"id": 12})()})
+
+    assert result["approved_training_examples"] == 1
+    assert db.query(TrainingExample).filter(TrainingExample.tenant_id == tenant.id, TrainingExample.labeled_intent == "STEP_PREP").count() == 1
+    assert db.query(IntentKeyword).filter(IntentKeyword.tenant_id == tenant.id, IntentKeyword.intent_code == "STEP_PREP", IntentKeyword.phrase == "اختبار ستيب").count() == 1
+
+
+def test_create_intent_only_when_missing_and_checked_without_routing_rule(db, tenant):
+    unchecked = SmartImportApproveRequest(
+        source_type="paste",
+        total_rows=1,
+        items=[SmartImportApproveItem(row_id="row_1", decision="approved", redacted_excerpt="step", intent_code="STEP_PREP", create_intent=False)],
+    )
+    approve_import(unchecked, tenant=tenant, db=db, ctx={"user": type("User", (), {"id": 13})()})
+    assert db.query(IntentDefinition).filter(IntentDefinition.tenant_id == tenant.id, IntentDefinition.code == "STEP_PREP").count() == 0
+
+    checked = SmartImportApproveRequest(
+        source_type="paste",
+        total_rows=1,
+        items=[SmartImportApproveItem(row_id="row_2", decision="approved", redacted_excerpt="step", intent_code="STEP_PREP", intent_label="STEP prep", create_intent=True)],
+    )
+    result = approve_import(checked, tenant=tenant, db=db, ctx={"user": type("User", (), {"id": 13})()})
+
+    assert result["approved_intents"] == 1
+    assert db.query(IntentDefinition).filter(IntentDefinition.tenant_id == tenant.id, IntentDefinition.code == "STEP_PREP").count() == 1
+    assert db.query(RoutingRule).filter(RoutingRule.tenant_id == tenant.id, RoutingRule.intent_code == "STEP_PREP").count() == 0
+
+
+def test_faq_is_not_created_without_approved_answer(db, tenant):
+    payload = SmartImportApproveRequest(
+        source_type="paste",
+        total_rows=1,
+        items=[
+            SmartImportApproveItem(
+                row_id="row_1",
+                decision="approved",
+                redacted_excerpt="what is the price",
+                intent_code="PRICING",
+                create_faq=True,
+                faq_topic_key="empty_answer",
+                faq_question="what is the price",
+            )
+        ],
+    )
+
+    result = approve_import(payload, tenant=tenant, db=db, ctx={"user": type("User", (), {"id": 14})()})
+
+    assert result["approved_faq_items"] == 0
+    assert db.query(FaqItem).filter(FaqItem.tenant_id == tenant.id, FaqItem.topic_key == "empty_answer").count() == 0
 
 
 def test_approval_redacts_pii_and_audit_logs_counts_only(db, tenant):

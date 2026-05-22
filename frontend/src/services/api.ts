@@ -115,6 +115,7 @@ export type SmartImportRow = {
     faq_topic_key: string;
     faq_question: string;
     faq_answer: string;
+    routing_behavior: string;
     create_intent: boolean;
     create_faq: boolean;
   };

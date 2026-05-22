@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.api.routes_config import audit, ensure_routing_rule_for_intent, normalize_intent_code, normalize_topic_key
+from app.api.routes_config import audit, normalize_intent_code, normalize_topic_key
 from app.core.db import get_db
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, get_current_tenant, require_tenant_roles
 from app.models.entities import FaqItem, IntentDefinition, IntentKeyword, Tenant, TrainingExample
@@ -37,6 +37,7 @@ class SmartImportApproveItem(BaseModel):
     training_example_text: str | None = None
     keyword_phrases: list[str] = Field(default_factory=list, max_length=10)
     create_faq: bool = False
+    routing_behavior: str | None = None
     faq_topic_key: str | None = None
     faq_question: str | None = None
     faq_answer_ar: str | None = None
@@ -192,7 +193,6 @@ def _resolve_or_create_intent(db: Session, *, tenant_id: int, item: SmartImportA
     )
     db.add(row)
     db.flush()
-    ensure_routing_rule_for_intent(db, tenant_id, row, actor_id=None)
     return row
 
 

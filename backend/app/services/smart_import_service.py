@@ -56,11 +56,34 @@ PROTECTED_PATTERNS: list[tuple[str, str, str, tuple[str, ...], str]] = [
 ]
 
 UNIVERSAL_PATTERNS: list[tuple[str, str, str, tuple[str, ...]]] = [
+    ("STEP_PREP", "STEP prep", "normal", ("اختبار ستيب", "دورة ستيب", "ستيب", "step prep", "step test", "step course", "STEP")),
     ("REGISTRATION", "Registration", "offer_handoff", ("تسجيل", "اسجل", "سجل", "registration", "register", "sign up", "enroll")),
-    ("PRICING", "Pricing", "normal", ("السعر", "بكم", "كم", "اسعار", "سعر", "price", "pricing", "cost", "fees", "how much")),
+    ("PRICING", "Pricing", "normal", ("كم السعر", "السعر", "بكم", "رسوم", "التكلفة", "اسعار", "سعر", "price", "pricing", "cost", "fees", "how much")),
     ("LOCATION", "Location", "normal", ("موقع", "وينكم", "العنوان", "location", "address", "where are you")),
     ("SCHEDULES", "Schedule", "normal", ("موعد", "مواعيد", "وقت", "دوام", "schedule", "time", "hours", "when")),
 ]
+
+WEAK_KEYWORDS = {
+    "كم",
+    "عندكم",
+    "في",
+    "هل",
+    "ابي",
+    "أبي",
+    "ابغى",
+    "أبغى",
+    "لو سمحت",
+    "ممكن",
+    "i",
+    "want",
+    "please",
+    "do",
+    "you",
+    "have",
+    "is",
+    "the",
+    "a",
+}
 
 
 @dataclass
@@ -145,6 +168,7 @@ class SmartImportService:
                         "faq_topic_key": suggestion["suggested_faq_topic"]["topic_key"] if suggestion["suggested_faq_topic"] else "",
                         "faq_question": redacted_excerpt,
                         "faq_answer": "",
+                        "routing_behavior": suggestion["routing_hint"]["behavior"],
                         "create_intent": False,
                         "create_faq": False,
                     },
@@ -185,6 +209,33 @@ class SmartImportService:
                 "suggested_keywords": keywords,
                 "suggested_faq_topic": self._faq_suggestion(db, tenant.id, code, raw_text, confidence),
                 "routing_hint": routing_hint,
+                "warnings": warnings,
+            }
+
+        step_match = self._match_patterns(normalized, [UNIVERSAL_PATTERNS[0]])
+        if step_match:
+            code, label, route_behavior, matched = step_match
+            confidence = 0.9
+            intent = self._intent_payload(db, tenant.id, code, label)
+            if not intent["existing"]:
+                warnings.append("new_intent_candidate")
+            return {
+                "suggested_intent": intent,
+                "confidence": confidence,
+                "suggested_keywords": self._keyword_suggestions(raw_text, matched, language),
+                "suggested_faq_topic": self._faq_suggestion(db, tenant.id, code, raw_text, confidence),
+                "routing_hint": {"behavior": route_behavior, "owner_role": "BOT", "reason": "Matched STEP preparation phrase."},
+                "warnings": warnings,
+            }
+
+        if self._only_weak_terms(normalized):
+            warnings.append("needs_review")
+            return {
+                "suggested_intent": {"code": "UNKNOWN", "label": "Unknown", "existing": False},
+                "confidence": 0.0,
+                "suggested_keywords": [],
+                "suggested_faq_topic": None,
+                "routing_hint": {"behavior": "clarify", "owner_role": "OPERATIONS_STAFF", "reason": "Only weak generic terms were found."},
                 "warnings": warnings,
             }
 
@@ -264,25 +315,59 @@ class SmartImportService:
         values: list[str] = []
         for phrase in matched:
             cleaned = PUNCT_EDGE_RE.sub("", self.redact_pii(phrase)).strip()
-            if cleaned and cleaned.lower() not in {item.lower() for item in values}:
+            if self._useful_keyword(cleaned) and cleaned.lower() not in {item.lower() for item in values}:
                 values.append(cleaned[:80])
         if values:
             return values[:4]
         redacted = self.redact_pii(raw_text)
         tokens = normalize_text(redacted).split()
-        if 1 <= len(tokens) <= 6:
-            candidate = " ".join(tokens)
-            if candidate and not candidate.startswith("["):
-                values.append(candidate[:80])
+        meaningful_tokens = [token for token in tokens if self._useful_keyword(token)]
+        for size in (3, 2, 1):
+            if len(meaningful_tokens) < size:
+                continue
+            for index in range(0, len(meaningful_tokens) - size + 1):
+                candidate = " ".join(meaningful_tokens[index:index + size])
+                if self._useful_keyword(candidate) and candidate.lower() not in {item.lower() for item in values}:
+                    values.append(candidate[:80])
+                if len(values) >= 3:
+                    break
+            if values:
+                break
         return values[:3]
 
     def _match_patterns(self, normalized: str, patterns: list[tuple]) -> tuple | None:
         for row in patterns:
             phrases = row[3]
             for phrase in phrases:
-                if normalize_text(phrase) and normalize_text(phrase) in normalized:
+                if self._phrase_matches(normalized, phrase):
                     return (*row[:3], (phrase,), *row[4:]) if len(row) == 5 else (*row[:3], (phrase,))
         return None
+
+    def _phrase_matches(self, normalized: str, phrase: str) -> bool:
+        normalized_phrase = normalize_text(phrase)
+        if not normalized_phrase:
+            return False
+        if " " not in normalized_phrase:
+            return normalized_phrase in set(normalized.split())
+        return f" {normalized_phrase} " in f" {normalized} "
+
+    def _useful_keyword(self, value: str) -> bool:
+        cleaned = PUNCT_EDGE_RE.sub("", str(value or "")).strip()
+        if not cleaned or cleaned.startswith("["):
+            return False
+        normalized = normalize_text(cleaned)
+        if not normalized or normalized in {normalize_text(item) for item in WEAK_KEYWORDS}:
+            return False
+        if len(normalized) < 3:
+            return False
+        return True
+
+    def _only_weak_terms(self, normalized: str) -> bool:
+        tokens = normalized.split()
+        if not tokens:
+            return False
+        weak = {normalize_text(item) for item in WEAK_KEYWORDS}
+        return all(token in weak for token in tokens)
 
     def _parse_messy_text(self, text: str, *, source_type: str) -> list[ParsedMessage]:
         messages: list[ParsedMessage] = []

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.tenancy import require_internal_access
+
 from dataclasses import dataclass
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -11,7 +13,7 @@ from app.core.tenancy import ROLE_BUSINESS_ADMIN, get_current_tenant, require_te
 from app.models.entities import ChannelConfig, Tenant
 from app.services.tenant_channel_service import TenantChannelService
 
-router = APIRouter(prefix="/deployment", tags=["deployment"])
+router = APIRouter(prefix="/deployment", tags=["deployment"], dependencies=[Depends(require_internal_access)])
 channel_service = TenantChannelService()
 
 

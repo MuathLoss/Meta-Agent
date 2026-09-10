@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.tenancy import require_internal_access
+
 from dataclasses import asdict
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -27,7 +29,7 @@ from app.services.intent_rules import IntentRules
 from app.services.routing_engine import RoutingEngine
 from app.services.tenant_channel_service import TenantChannelService
 
-router = APIRouter(prefix="/acceptance", tags=["acceptance"])
+router = APIRouter(prefix="/acceptance", tags=["acceptance"], dependencies=[Depends(require_internal_access)])
 intent_rules = IntentRules()
 routing_engine = RoutingEngine()
 channel_service = TenantChannelService()

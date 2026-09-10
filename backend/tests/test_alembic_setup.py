@@ -12,8 +12,8 @@ def test_alembic_has_one_head_and_metadata_loads():
     config = Config(str(backend_dir / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["20260515_0006"]
-    assert len(Base.metadata.tables) == 20
+    assert script.get_heads() == ["20260910_0007"]
+    assert len(Base.metadata.tables) == 21
     assert "tenants" in Base.metadata.tables
     assert "webhook_events" in Base.metadata.tables
 

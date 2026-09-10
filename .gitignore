@@ -23,3 +23,9 @@ backend/uploads/
 
 # Local uploaded tenant files
 backend/uploads/
+
+# Isolated staging / visual checks
+.staging-backups/
+.qa/
+frontend/tsconfig.tsbuildinfo
+.local-backups/

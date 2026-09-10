@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -56,8 +57,10 @@ class WhatsAppAdapter:
             return False
         return not any(marker in normalized for marker in self.PLACEHOLDER_SECRET_MARKERS)
 
-    def send_text(self, *, access_token: str, phone_number_id: str, to_phone: str, text: str, timeout_seconds: float = 10.0) -> dict[str, Any]:
-        url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
+    def send_text(self, *, access_token: str, phone_number_id: str, to_phone: str, text: str, timeout_seconds: float = 10.0, graph_api_version: str = "v20.0") -> dict[str, Any]:
+        if not re.fullmatch(r"v\d+\.\d+", graph_api_version):
+            raise ValueError("Invalid Meta API version")
+        url = f"https://graph.facebook.com/{graph_api_version}/{phone_number_id}/messages"
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",

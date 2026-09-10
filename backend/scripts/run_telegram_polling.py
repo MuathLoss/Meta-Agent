@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import traceback
 import sys
 import time
 from pathlib import Path
@@ -14,8 +13,8 @@ from app.core.db import SessionLocal
 from app.services.telegram_polling_service import TelegramPollingService
 
 
-def run_once(disable_webhook: bool) -> None:
-    service = TelegramPollingService()
+def run_once(disable_webhook: bool, service: TelegramPollingService | None = None) -> None:
+    service = service or TelegramPollingService()
     with SessionLocal() as db:
         results = service.poll_once(db, disable_webhook=disable_webhook)
         db.commit()
@@ -25,9 +24,10 @@ def run_once(disable_webhook: bool) -> None:
 def run_loop(interval: float, disable_webhook: bool) -> None:
     sleep_seconds = max(interval, 0.5)
 
+    service = TelegramPollingService()
     while True:
         try:
-            run_once(disable_webhook=disable_webhook)
+            run_once(disable_webhook=disable_webhook, service=service)
         except KeyboardInterrupt:
             raise
         except Exception as exc:
@@ -35,13 +35,12 @@ def run_loop(interval: float, disable_webhook: bool) -> None:
                 {
                     "status": "polling_error",
                     "error_type": type(exc).__name__,
-                    "error": str(exc),
+                    "error": "Provider connection failed. Check Channels for connection details.",
                     "retry_in_seconds": sleep_seconds,
                 },
                 file=sys.stderr,
                 flush=True,
             )
-            traceback.print_exc()
         time.sleep(sleep_seconds)
 
 

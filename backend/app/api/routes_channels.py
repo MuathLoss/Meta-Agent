@@ -4,6 +4,7 @@ from secrets import token_urlsafe
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.db import get_db
+from app.core.rate_limit import enforce_rate_limit
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, get_current_tenant, require_tenant_roles
 from app.models.entities import Tenant
 from app.schemas.channels import ChannelConfigRequest, ChannelConfigResponse, ChannelTestConsoleRequest, ChannelTestConsoleResponse
@@ -130,3 +131,23 @@ def poll_email_once(tenant_slug: str, db: Session = Depends(get_db), tenant: Ten
         "messages_processed": result.messages_processed,
         "error": result.error,
     }
+
+
+@router.get("/readiness")
+def channel_readiness(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(ROLE_BUSINESS_ADMIN))):
+    from app.services.channel_health_service import readiness, REQUIRED
+    rows = {r.channel_type: r for r in service.list(db, tenant.id)}
+    return [readiness(rows.get(kind), kind) for kind in REQUIRED]
+
+
+@router.post("/{channel_type}/verify")
+def verify_channel(channel_type: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(ROLE_BUSINESS_ADMIN))):
+    from app.services.channel_health_service import stamped_verify
+    row = service.get(db, tenant.id, channel_type)
+    if not row:
+        raise HTTPException(404, "Save this channel before checking the connection.")
+    enforce_rate_limit(f"channel_verify:{tenant.id}", max_requests=10, window_seconds=60)
+    result = stamped_verify(row)
+    row.public_config_json = {**(row.public_config_json or {}), "connection_check": result}
+    db.commit()
+    return result

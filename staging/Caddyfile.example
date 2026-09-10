@@ -1,0 +1,5 @@
+# Hosting preparation only. Choose a domain and configure DNS before use.
+# Run in the same container network as the frontend service.
+your-domain.example {
+    reverse_proxy frontend:80
+}

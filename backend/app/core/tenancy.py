@@ -58,3 +58,9 @@ def require_tenant_roles(*allowed_roles: str):
             raise HTTPException(status_code=403, detail="Not allowed for this tenant")
         return {"user": user, "tenant": tenant, "roles": roles}
     return dep
+
+
+def require_internal_access(user: User = Depends(get_current_user)) -> User:
+    if not user.is_platform_admin:
+        raise HTTPException(status_code=403, detail="Internal tools are restricted to platform administrators")
+    return user

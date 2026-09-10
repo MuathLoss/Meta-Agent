@@ -173,6 +173,7 @@ class OutboundService:
             result = self.whatsapp.send_text(
                 access_token=creds["access_token"],
                 phone_number_id=creds.get("phone_number_id") or public_config.get("phone_number_id"),
+                graph_api_version=str(creds.get("graph_api_version") or public_config.get("graph_api_version") or "v20.0"),
                 to_phone=destination,
                 text=text,
             )

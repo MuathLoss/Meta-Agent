@@ -240,3 +240,17 @@ class AuditLog(Base, TimeMixin):
     entity_type: Mapped[str] = mapped_column(String(120))
     entity_id: Mapped[str | None] = mapped_column(String(120))
     details_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+class ImportJob(Base, TimeMixin):
+    __tablename__ = "import_jobs"
+    __table_args__ = (Index("ix_import_jobs_tenant_updated", "tenant_id", "updated_at"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(160), default="Message import")
+    source_type: Mapped[str] = mapped_column(String(40), default="paste")
+    status: Mapped[str] = mapped_column(String(30), default="draft")
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)

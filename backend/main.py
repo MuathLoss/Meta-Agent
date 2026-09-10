@@ -1,3 +1,4 @@
+from fastapi.responses import JSONResponse
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -49,6 +50,7 @@ app.add_middleware(
         "Content-Type",
         "Origin",
         "X-Tenant-Slug",
+        "X-Support-Access-Reason",
         "X-Hub-Signature-256",
         "X-Requested-With",
         "X-Channel-Webhook-Secret",
@@ -79,7 +81,7 @@ def readiness():
         return {"status": "ready", "database": "ok"}
     except Exception:
         logger.warning("database readiness check failed: database_error")
-        return {"status": "not_ready", "database": "error", "error": "database_unavailable"}
+        return JSONResponse(status_code=503, content={"status": "not_ready", "database": "error", "error": "database_unavailable"})
 
 app.include_router(routes_auth.router)
 app.include_router(routes_onboarding.router)

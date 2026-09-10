@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import monotonic
 
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ class TelegramPollResult:
     updates_seen: int
     updates_processed: int
     last_update_id: int | None
+    error: str | None = None
 
 
 class TelegramPollingService:
@@ -28,21 +30,23 @@ class TelegramPollingService:
         self.channel_service = TenantChannelService()
         self.telegram = TelegramAdapter()
         self.orchestrator = ConversationOrchestrator()
+        self.retry_after: dict[int, tuple[str, float]] = {}
 
     def _active_channels(self, db: Session) -> list[ChannelConfig]:
         rows = db.query(ChannelConfig).filter(ChannelConfig.channel_type == "telegram").all()
         active: list[ChannelConfig] = []
         for row in rows:
             public_config = row.public_config_json or {}
-            creds = self.channel_service.credentials(row)
-            if public_config.get("enabled") is True and creds.get("bot_token") and creds.get("bot_token") != "pending":
+            if public_config.get("enabled") is True:
                 active.append(row)
         return active
 
     def _poll_one(self, db: Session, row: ChannelConfig, *, disable_webhook: bool) -> TelegramPollResult:
         public_config = row.public_config_json or {}
         creds = self.channel_service.credentials(row)
-        bot_token = str(creds["bot_token"])
+        bot_token = str(creds.get("bot_token") or "")
+        if not bot_token or bot_token == "pending":
+            return TelegramPollResult(row.tenant_id, row.id, 0, 0, None, "missing_credentials")
         tenant = db.get(Tenant, row.tenant_id)
         if not tenant:
             return TelegramPollResult(tenant_id=row.tenant_id, channel_id=row.id, updates_seen=0, updates_processed=0, last_update_id=None)
@@ -109,5 +113,22 @@ class TelegramPollingService:
     def poll_once(self, db: Session, *, disable_webhook: bool = True) -> list[TelegramPollResult]:
         results: list[TelegramPollResult] = []
         for row in self._active_channels(db):
-            results.append(self._poll_one(db, row, disable_webhook=disable_webhook))
+            fingerprint = row.encrypted_credentials or ""
+            retry = self.retry_after.get(row.id)
+            if retry and retry[0] == fingerprint and monotonic() < retry[1]:
+                continue
+            try:
+                result = self._poll_one(db, row, disable_webhook=disable_webhook)
+                db.commit()
+                results.append(result)
+                if result.error:
+                    self.retry_after[row.id] = (fingerprint, monotonic() + 60)
+                else:
+                    self.retry_after.pop(row.id, None)
+            except Exception as exc:
+                db.rollback()
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                error = "credentials_rejected" if status in {401, 403} else "webhook_or_polling_conflict" if status == 409 else "provider_unavailable"
+                self.retry_after[row.id] = (fingerprint, monotonic() + (300 if error == "credentials_rejected" else 60))
+                results.append(TelegramPollResult(row.tenant_id, row.id, 0, 0, None, error))
         return results

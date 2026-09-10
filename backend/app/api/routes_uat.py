@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.tenancy import require_internal_access
+
 from dataclasses import asdict
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
@@ -13,7 +15,7 @@ from app.services.intent_rules import IntentRules
 from app.services.routing_engine import RoutingEngine
 from app.services.working_hours import is_inside_working_hours
 
-router = APIRouter(prefix="/uat", tags=["uat"])
+router = APIRouter(prefix="/uat", tags=["uat"], dependencies=[Depends(require_internal_access)])
 intent_rules = IntentRules()
 routing_engine = RoutingEngine()
 UAT_FIXTURE_ENVS = {"development", "test"}

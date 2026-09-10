@@ -67,7 +67,10 @@ def test_readiness_db_failure_response_is_safe(monkeypatch):
 
     monkeypatch.setattr(main, "SessionLocal", lambda: BrokenSession())
 
-    response = main.readiness()
+    result = main.readiness()
+    assert result.status_code == 503
+    import json
+    response = json.loads(result.body)
 
     assert response == {"status": "not_ready", "database": "error", "error": "database_unavailable"}
     assert "password" not in str(response)

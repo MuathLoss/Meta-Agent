@@ -8,6 +8,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, get_current_tenant, get_current_user, require_tenant_roles
 from app.models.entities import (
     AuditLog,
+    ImportJob,
     Branch,
     Broadcast,
     BroadcastRecipient,
@@ -137,6 +138,7 @@ def delete_account(
     )
 
     deleted_tenant = {"id": tenant.id, "slug": tenant.slug}
+    db.query(ImportJob).filter(ImportJob.tenant_id == tenant.id).delete()
     db.query(BroadcastRecipient).filter(BroadcastRecipient.tenant_id == tenant.id).delete()
     db.query(Broadcast).filter(Broadcast.tenant_id == tenant.id).delete()
     db.query(Ticket).filter(Ticket.tenant_id == tenant.id).delete()

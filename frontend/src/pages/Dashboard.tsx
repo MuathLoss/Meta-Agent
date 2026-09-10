@@ -1,3 +1,6 @@
+import { ChannelsPage } from './ChannelsPage';
+import { SmartImportStudio } from './SmartImportStudio';
+import { SetupGuide, WorkspaceHome } from './WorkspaceGuide';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -38,11 +41,11 @@ type DevView = 'uat' | 'deployment' | 'handoff';
 
 const tabs: Array<{ key: Tab; label: string }> = [
   { key: 'overview', label: 'Overview' },
-  { key: 'onboarding', label: 'Onboarding' },
+  { key: 'onboarding', label: 'Setup guide' },
   { key: 'inbox', label: 'Inbox' },
-  { key: 'settings', label: 'Settings' },
-  { key: 'staff', label: 'Staff' },
-  { key: 'knowledge', label: 'Knowledge & Responses' },
+  { key: 'settings', label: 'Business settings' },
+  { key: 'staff', label: 'Team' },
+  { key: 'knowledge', label: 'Knowledge' },
   { key: 'channels', label: 'Channels' },
   { key: 'tickets', label: 'Tickets' },
   { key: 'customers', label: 'Customers' },
@@ -148,9 +151,15 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   const currentPageTitle = tab === 'dev'
     ? devView === 'uat' ? 'UAT tests' : devView === 'handoff' ? 'Final handoff' : 'Deployment'
     : tabs.find((item) => item.key === tab)?.label || 'Dashboard';
-  const primaryTabs = tabs.slice(0, 3);
-  const workspaceTabs = tabs.slice(3, 10);
-  const systemTabs = tabs.slice(10);
+  const roles = session.memberships.find(m => m.tenant_slug === tenantSlug)?.roles || [];
+  const canConfigure = session.user.is_platform_admin || roles.includes('BUSINESS_ADMIN');
+  const canOperate = canConfigure || roles.some(r => ['OPERATIONS_STAFF', 'FINANCE', 'CERTIFICATES', 'SUPERVISOR'].includes(r));
+  const canBroadcast = canConfigure || roles.includes('BROADCAST_OPERATOR');
+  const primaryTabs = tabs.filter(t => (canOperate && ['overview', 'inbox', 'tickets', 'customers'].includes(t.key)) || (canBroadcast && t.key === 'broadcasts'));
+  const workspaceTabs = canConfigure ? tabs.filter(t => ['onboarding', 'knowledge', 'channels', 'staff', 'settings'].includes(t.key)) : [];
+  const systemTabs = canConfigure ? tabs.filter(t => t.key === 'audit') : [];
+
+  useEffect(() => { if (!canOperate && canBroadcast) setTab('broadcasts'); }, [canOperate, canBroadcast]);
 
   function selectTab(nextTab: Tab) {
     setTab(nextTab);
@@ -190,18 +199,18 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
     try {
       const [t, r, a, i, b, s, f, it, rr, ch, tk, c, br] = await Promise.all([
         api.tenant(token, tenantSlug),
-        api.readiness(token, tenantSlug),
-        api.analytics(token, tenantSlug),
-        api.inbox(token, tenantSlug),
-        api.branches(token, tenantSlug),
-        api.staff(token, tenantSlug),
-        api.faq(token, tenantSlug),
-        api.intents(token, tenantSlug),
-        api.routingRules(token, tenantSlug),
-        api.channels(token, tenantSlug),
-        api.tickets(token, tenantSlug),
-        api.customers(token, tenantSlug),
-        api.broadcasts(token, tenantSlug),
+        canConfigure ? api.readiness(token, tenantSlug) : Promise.resolve(null),
+        canOperate ? api.analytics(token, tenantSlug) : Promise.resolve(null),
+        canOperate ? api.inbox(token, tenantSlug) : Promise.resolve([]),
+        canConfigure ? api.branches(token, tenantSlug) : Promise.resolve([]),
+        canConfigure ? api.staff(token, tenantSlug) : Promise.resolve([]),
+        canConfigure ? api.faq(token, tenantSlug) : Promise.resolve([]),
+        canConfigure ? api.intents(token, tenantSlug) : Promise.resolve([]),
+        canConfigure ? api.routingRules(token, tenantSlug) : Promise.resolve([]),
+        canConfigure ? api.channels(token, tenantSlug) : Promise.resolve([]),
+        canOperate ? api.tickets(token, tenantSlug) : Promise.resolve([]),
+        canOperate ? api.customers(token, tenantSlug) : Promise.resolve([]),
+        canBroadcast ? api.broadcasts(token, tenantSlug) : Promise.resolve([]),
       ]);
       setTenant(t); setReadiness(r); setAnalytics(a); updateInboxState(i); setBranches(b); setStaff(s); setFaq(f); setIntents(it); setRouting(rr); setChannels(ch); setTickets(tk); setCustomers(c); setBroadcasts(br);
     } catch (err) {
@@ -227,6 +236,7 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   }
 
   async function refreshInboxLive() {
+    if (!canOperate) return;
     const rows = await api.inbox(token, tenantSlug);
     updateInboxState(rows);
     if (selectedConversationId !== null) {
@@ -284,8 +294,8 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
     return () => window.removeEventListener('resize', updatePosition);
   }, [devMenuOpen]);
   useEffect(() => {
-    void refreshInboxLive();
-    const timer = window.setInterval(() => { void refreshInboxLive(); }, 4000);
+    void refreshInboxLive().catch(() => {});
+    const timer = window.setInterval(() => { void refreshInboxLive().catch(() => {}); }, 4000);
     return () => window.clearInterval(timer);
   }, [tab, selectedConversationId]);
   useEffect(() => () => {
@@ -295,7 +305,7 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   }, []);
 
   return (
-    <main className={`app-shell${mobileNavOpen ? ' mobile-nav-open' : ''}`}>
+    <main className={`workspace-v2 app-shell${mobileNavOpen ? ' mobile-nav-open' : ''}`}>
       <header className="mobile-shell-bar">
         <button className="mobile-menu-button" type="button" aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileNavOpen} onClick={() => { setMobileNavOpen((current) => !current); if (mobileNavOpen) setDevMenuOpen(false); }}>
           <span aria-hidden="true" />
@@ -316,46 +326,46 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
               : initialsFromName(tenantName)}
           </div>
           <div className="brand-copy">
-            <span className="brand-kicker">[Workspace]</span>
-            <h2>Agent Platform</h2>
+            <span className="brand-kicker">Your workspace</span>
+            <h2>Agent Workspace</h2>
             <p>{tenantSlug}</p>
-            <span className="brand-micro">Control node / live</span>
+
           </div>
         </div>
         <nav>
           <div className="nav-section">
-            <span className="nav-section-label">Operate</span>
+            <span className="nav-section-label">Work</span>
             {primaryTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => selectTab(t.key)}><span className="nav-button-label">{t.label}{t.key === 'inbox' && hasComplaintAlert && <span className="nav-alert-dot" aria-hidden="true" />}</span></button>)}
           </div>
-          <div className="nav-section">
-            <span className="nav-section-label">Configure</span>
+          <div className="nav-section" hidden={!canConfigure}>
+            <span className="nav-section-label">Manage</span>
             {workspaceTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => selectTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
           </div>
           <div className="nav-section">
             <span className="nav-section-label">System</span>
             {systemTabs.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} aria-current={tab === t.key ? 'page' : undefined} onClick={() => selectTab(t.key)}><span className="nav-button-label">{t.label}</span></button>)}
-            <div className="sidebar-flyout-wrap">
+            {session.user.is_platform_admin && <div className="sidebar-flyout-wrap">
               <button ref={devButtonRef} className={tab === 'dev' ? 'active' : ''} aria-current={tab === 'dev' ? 'page' : undefined} onClick={selectDevTab}>
-                <span className="nav-button-label">Dev</span>
+                <span className="nav-button-label">Internal tools</span>
               </button>
-            </div>
+            </div>}
           </div>
         </nav>
         <div className="sidebar-actions">
           <button className="secondary" onClick={refreshAll}>Refresh</button>
           <button className="secondary" onClick={onLogout}>Log out</button>
-          <button onClick={() => { setDeleteAccountPassword(''); setConfirmDeleteAccount(true); }} disabled={deletingAccount}>Delete account</button>
+          <button className="text-button danger" hidden={!canConfigure} onClick={() => { setDeleteAccountPassword(''); setConfirmDeleteAccount(true); }} disabled={deletingAccount}>Delete account</button>
         </div>
       </aside>
-      {devMenuOpen && devMenuPosition && <div className="dev-menu-overlay" onClick={() => setDevMenuOpen(false)}>
+      {session.user.is_platform_admin && devMenuOpen && devMenuPosition && <div className="dev-menu-overlay" onClick={() => setDevMenuOpen(false)}>
         <div className="dev-flyout-panel" style={{ top: `${devMenuPosition.top}px`, left: `${devMenuPosition.left}px` }} onClick={(e) => e.stopPropagation()}>
-          <button className={tab === 'dev' && devView === 'deployment' ? 'active' : ''} onClick={() => { setDevView('deployment'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
+          <button className={session.user.is_platform_admin && tab === 'dev' && devView === 'deployment' ? 'active' : ''} onClick={() => { setDevView('deployment'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
             Deployment
           </button>
-          <button className={tab === 'dev' && devView === 'uat' ? 'active' : ''} onClick={() => { setDevView('uat'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
+          <button className={session.user.is_platform_admin && tab === 'dev' && devView === 'uat' ? 'active' : ''} onClick={() => { setDevView('uat'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
             UAT tests
           </button>
-          <button className={tab === 'dev' && devView === 'handoff' ? 'active' : ''} onClick={() => { setDevView('handoff'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
+          <button className={session.user.is_platform_admin && tab === 'dev' && devView === 'handoff' ? 'active' : ''} onClick={() => { setDevView('handoff'); setTab('dev'); setDevMenuOpen(false); setMobileNavOpen(false); }}>
             Final handoff
           </button>
         </div>
@@ -363,28 +373,29 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
       <section className="content">
         {handoffToast?.visible && <div className="handoff-toast" role="status" aria-live="polite"><strong>Client waiting in handoff</strong><span>{handoffToast.count > 1 ? `${handoffToast.count} conversations need attention` : 'A conversation needs your response'}</span></div>}
         <header className="topbar">
-          <div><p className="eyebrow">Tenant control plane / {currentPageTitle}</p><h1>{tenantName}</h1><p className="muted">Logged in as {session.user.full_name}</p></div>
+          <div><p className="eyebrow">{tenantName}</p><h1>{currentPageTitle}</h1></div>
           <div className="topbar-meta">
-            <div className="workspace-pill"><span>Workspace</span><strong>{tenantSlug}</strong></div>
+            <div className="workspace-pill"><span>Signed in as</span><strong>{session.user.full_name}</strong></div>
             <div className="user-pill">{loading ? 'Loading...' : tenant?.status || 'active'}</div>
           </div>
         </header>
         {boxError(error)}
+        {canConfigure && tab !== 'onboarding' && tenant?.status !== 'active' && <button className="setup-return secondary" onClick={() => selectTab('onboarding')}>← Back to setup guide</button>}
         <div key={activePageKey} className="page-transition">
-          {tab === 'overview' && <Overview tenant={tenant} token={token} tenantSlug={tenantSlug} readiness={readiness} analytics={analytics} previewText={previewText} setPreviewText={setPreviewText} previewPhone={previewPhone} setPreviewPhone={setPreviewPhone} runPreview={runPreview} preview={preview} publish={async () => { await api.publish(token, tenantSlug); await refreshAll(); }} reload={refreshAll} />}
-          {tab === 'onboarding' && <OnboardingWizard token={token} tenantSlug={tenantSlug} readiness={readiness} reload={refreshAll} />}
+          {tab === 'overview' && <WorkspaceHome tenant={tenant} readiness={readiness} analytics={analytics} canConfigure={canConfigure} onNavigate={selectTab} />}
+          {tab === 'onboarding' && canConfigure && <SetupGuide tenant={tenant} readiness={readiness} onNavigate={selectTab} token={token} tenantSlug={tenantSlug} channels={channels} reload={refreshAll} />}
           {tab === 'inbox' && <Inbox rows={inbox} selectedConversationId={selectedConversationId} conversation={conversation} openConversation={openConversation} handoff={async (id) => { await api.handoff(token, tenantSlug, id); await openConversation(id); await refreshAll(); }} resolve={async (id) => { await api.resolve(token, tenantSlug, id); await openConversation(id); await refreshAll(); }} reopen={async (id) => { await api.reopen(token, tenantSlug, id); await openConversation(id); await refreshAll(); }} sendReply={async (id, text) => { await api.replyToConversation(token, tenantSlug, id, text); await openConversation(id); await refreshAll(); }} />}
           {tab === 'settings' && <Settings tenant={tenant} branches={branches} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
           {tab === 'staff' && <Staff rows={staff} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
           {tab === 'knowledge' && <KnowledgeResponses faq={faq} intents={intents} routing={routing} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
-          {tab === 'channels' && <Channels rows={channels} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
+          {tab === 'channels' && <ChannelsPage rows={channels} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
           {tab === 'tickets' && <Tickets rows={tickets} token={token} tenantSlug={tenantSlug} reload={refreshAll} openConversation={openConversation} />}
           {tab === 'customers' && <Customers rows={customers} />}
           {tab === 'broadcasts' && <Broadcasts rows={broadcasts} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
           {tab === 'audit' && <SimpleTable title="Audit logs" rows={audit} />}
-          {tab === 'dev' && devView === 'uat' && <UatPanel token={token} tenantSlug={tenantSlug} />}
-          {tab === 'dev' && devView === 'deployment' && <DeploymentPanel token={token} tenantSlug={tenantSlug} />}
-          {tab === 'dev' && devView === 'handoff' && <HandoffPanel token={token} tenantSlug={tenantSlug} />}
+          {session.user.is_platform_admin && tab === 'dev' && devView === 'uat' && <UatPanel token={token} tenantSlug={tenantSlug} />}
+          {session.user.is_platform_admin && tab === 'dev' && devView === 'deployment' && <DeploymentPanel token={token} tenantSlug={tenantSlug} />}
+          {session.user.is_platform_admin && tab === 'dev' && devView === 'handoff' && <HandoffPanel token={token} tenantSlug={tenantSlug} />}
         </div>
       </section>
       {confirmDeleteAccount && <div className="confirm-overlay" role="dialog" aria-modal="true">
@@ -430,229 +441,6 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
       </div>}
     </main>
   );
-}
-
-function Overview({ tenant, token, tenantSlug, readiness, analytics, previewText, setPreviewText, previewPhone, setPreviewPhone, runPreview, preview, publish, reload }: { tenant: TenantProfile | null; token: string; tenantSlug: string; readiness: Readiness | null; analytics: Analytics | null; previewText: string; setPreviewText: (v: string) => void; previewPhone: string; setPreviewPhone: (v: string) => void; runPreview: () => Promise<void>; preview: Record<string, unknown> | null; publish: () => Promise<void>; reload: () => Promise<void> }) {
-  const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [logoMessage, setLogoMessage] = useState<string | null>(null);
-  const logoUrl = resolveAssetUrl(tenant?.brand.logo_url);
-  const metricEntries = analytics ? Object.entries(analytics).filter(([, value]) => typeof value === 'number') as Array<[string, number]> : [];
-  const conversationStates = analytics?.conversation_states ? Object.entries(analytics.conversation_states) : [];
-
-  async function uploadLogo(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setLogoMessage(null);
-    if (!looksLikeImageFile(file)) {
-      setLogoMessage('Please choose a PNG, JPEG, or WebP image.');
-      event.target.value = '';
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      setLogoMessage('Please keep the image under 2 MB.');
-      event.target.value = '';
-      return;
-    }
-    try {
-      setUploadingLogo(true);
-      await api.uploadProfileLogo(token, tenantSlug, file);
-      await reload();
-      setLogoMessage('Profile picture updated.');
-    } catch (error) {
-      setLogoMessage(error instanceof Error ? error.message : 'Failed to upload profile picture.');
-    } finally {
-      setUploadingLogo(false);
-      event.target.value = '';
-    }
-  }
-
-  async function removeLogo() {
-    setLogoMessage(null);
-    try {
-      setUploadingLogo(true);
-      await api.updateProfile(token, tenantSlug, { logo_url: '' });
-      await reload();
-      setLogoMessage('Profile picture removed.');
-    } catch (error) {
-      setLogoMessage(error instanceof Error ? error.message : 'Failed to remove profile picture.');
-    } finally {
-      setUploadingLogo(false);
-    }
-  }
-
-  return <>
-    <section className="grid cards">
-      <div className="card"><p className="eyebrow">Readiness</p><h3>{readiness?.is_ready ? 'Ready to publish' : 'Needs setup'}</h3><div className="checklist">{readiness?.items.map((i) => <div key={i.key} className={i.passed ? 'pass' : 'fail'}><span>{i.passed ? '✓' : '•'}</span>{i.label}</div>)}</div><button onClick={publish}>Publish workspace</button></div>
-      <div className="card metrics-card">
-        <div className="analytics-head">
-          <div>
-            <p className="eyebrow">Analytics</p>
-            <h3>Tenant operations snapshot</h3>
-            <p className="muted">Live counts from the loaded tenant analytics endpoint.</p>
-          </div>
-          {analytics && <span className="analytics-freshness-pill">Loaded</span>}
-        </div>
-        {metricEntries.length > 0 ? <div className="metric-grid analytics-metric-grid">
-          {metricEntries.map(([key, value]) => <div className={`metric analytics-metric metric-${key.replace(/_/g, '-')}`} key={key}>
-            <span>{prettifyKeyLabel(key)}</span>
-            <strong>{value}</strong>
-          </div>)}
-        </div> : <div className="analytics-empty-state"><strong>No analytics loaded</strong><p>Tenant metrics will appear here after the analytics endpoint returns data.</p></div>}
-        {conversationStates.length > 0 && <div className="analytics-breakdown">
-          <div className="analytics-breakdown-head">
-            <strong>Conversation states</strong>
-            <span>{conversationStates.length} states</span>
-          </div>
-          <div className="analytics-state-grid">
-            {conversationStates.map(([state, count]) => <div key={state}><small>{prettifyKeyLabel(state)}</small><span>{count}</span></div>)}
-          </div>
-        </div>}
-        <div className="logo-upload-panel">
-          <div className="logo-upload-preview">
-            <div className="brand-mark overview-brand-mark">
-              {logoUrl
-                ? <img src={logoUrl} alt={`${tenant?.display_name || tenantSlug} logo`} className="brand-mark-image" />
-                : initialsFromName(tenant?.display_name || tenantSlug)}
-            </div>
-            <div>
-              <strong>Profile picture</strong>
-              <span>Updates the square logo beside Agent Platform.</span>
-            </div>
-          </div>
-          <div className="logo-upload-actions">
-            <label className="logo-upload-button">
-              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadLogo} disabled={uploadingLogo} />
-              <span>{uploadingLogo ? 'Uploading image...' : 'Upload image'}</span>
-            </label>
-            {tenant?.brand.logo_url && <button type="button" className="secondary logo-remove-button" onClick={() => void removeLogo()} disabled={uploadingLogo}>Remove</button>}
-          </div>
-          {logoMessage && <p className="logo-upload-message">{logoMessage}</p>}
-        </div>
-      </div>
-    </section>
-    <section className="card"><p className="eyebrow">Runtime preview</p><h3>Test tenant-scoped rule engine</h3><div className="preview-row"><input value={previewPhone} onChange={(e) => setPreviewPhone(e.target.value)} /><input value={previewText} onChange={(e) => setPreviewText(e.target.value)} /><button onClick={runPreview}>Run preview</button></div>{preview && <pre>{JSON.stringify(preview, null, 2)}</pre>}</section>
-  </>;
-}
-
-function OnboardingWizard({ token, tenantSlug, readiness, reload }: { token: string; tenantSlug: string; readiness: Readiness | null; reload: () => Promise<void> }) {
-  const [step, setStep] = useState(1);
-  const [displayName, setDisplayName] = useState('');
-  const [timezone, setTimezone] = useState('');
-  const [defaultLang, setDefaultLang] = useState('');
-  const [message, setMessage] = useState('كم السعر وهل فيه تسجيل؟');
-  const [analysis, setAnalysis] = useState<RuntimeClassification | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
-  const readinessItems = readiness?.items || [];
-  const completedCount = readinessItems.filter((item) => item.passed).length;
-  const totalCount = readinessItems.length;
-  const completionPercent = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
-  const setupSteps = [
-    { number: 1, title: 'Business account', detail: 'Profile and workspace identity.' },
-    { number: 2, title: 'Branches & hours', detail: 'Locations and availability.' },
-    { number: 3, title: 'Staff & roles', detail: 'Team access and ownership.' },
-    { number: 4, title: 'FAQ knowledge base', detail: 'Reusable business answers.' },
-    { number: 5, title: 'Intents & routing', detail: 'Classification and handoff.' },
-    { number: 6, title: 'Sample messages', detail: 'Test common customer asks.' },
-    { number: 7, title: 'Channel setup', detail: 'Connect customer channels.' },
-    { number: 8, title: 'Review readiness', detail: 'Resolve launch blockers.' },
-    { number: 9, title: 'Publish workspace', detail: 'Launch the private agent.' },
-  ];
-  const currentStepTitle = setupSteps.find((item) => item.number === step)?.title || 'Workspace details';
-  async function saveStep(e: FormEvent) {
-    e.preventDefault();
-    const data = {
-      display_name: displayName,
-      timezone,
-      default_lang: defaultLang,
-    };
-    await api.saveOnboardingStep(token, tenantSlug, step, data);
-    setSaved(`Saved onboarding step ${step}`);
-    await reload();
-  }
-  async function classify() {
-    const result = await api.runtimeClassify(token, tenantSlug, message);
-    setAnalysis(result);
-  }
-  return <section className="onboarding-shell">
-    <header className="onboarding-hero card">
-      <div>
-        <p className="eyebrow">Self-serve onboarding</p>
-        <h3>Configure a private agent workspace</h3>
-        <p className="muted">Save each setup draft, confirm readiness, then publish when the workspace is prepared for real customer conversations.</p>
-      </div>
-      <div className="onboarding-progress-card" aria-label={`${completionPercent}% onboarding readiness`}>
-        <span>Readiness</span>
-        <strong>{completionPercent}%</strong>
-        <div className="onboarding-progress-track"><i style={{ width: `${completionPercent}%` }} /></div>
-        <small>{completedCount} of {totalCount || 0} checks complete</small>
-      </div>
-    </header>
-
-    <div className="onboarding-steps" aria-label="Onboarding steps">
-      {setupSteps.map((item) => {
-        const isCurrent = step === item.number;
-        const isDone = item.number < step || (item.number === 4 && totalCount > 0 && completedCount === totalCount);
-        return <button type="button" key={item.number} className={isCurrent ? 'active' : isDone ? 'done' : ''} onClick={() => setStep(item.number)}>
-          <span>{isDone ? '✓' : item.number}</span>
-          <strong>{item.title}</strong>
-          <small>{item.detail}</small>
-        </button>;
-      })}
-    </div>
-
-    <section className="onboarding-layout">
-      <form className="card form-stack onboarding-form-card" onSubmit={saveStep}>
-        <div className="onboarding-card-head">
-          <div>
-            <p className="eyebrow">Draft setup</p>
-            <h3>Step {step}: {currentStepTitle}</h3>
-          </div>
-          <span className="onboarding-required-badge">Required fields</span>
-        </div>
-        <div className="onboarding-form-grid">
-          <label>Step number <span className="required-dot">*</span><input type="number" min={1} max={9} value={step} onChange={(e) => setStep(Number(e.target.value))} /></label>
-          <label>Display name <span className="required-dot">*</span><input placeholder="Your business name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></label>
-          <label>Timezone <span className="required-dot">*</span><input placeholder="Asia/Riyadh" value={timezone} onChange={(e) => setTimezone(e.target.value)} /></label>
-          <label>Default language <span className="required-dot">*</span><input placeholder="ar" value={defaultLang} onChange={(e) => setDefaultLang(e.target.value)} /></label>
-        </div>
-        <div className="onboarding-actions">
-          <button>Save step draft</button>
-          <span className="field-hint">Draft saves preserve the current step data for this tenant workspace.</span>
-        </div>
-        {saved && <p className="success-text onboarding-save-message">{saved}</p>}
-      </form>
-
-      <aside className="card onboarding-review-card">
-        <div className="onboarding-card-head">
-          <div>
-            <p className="eyebrow">Review readiness</p>
-            <h3>Launch checklist</h3>
-          </div>
-          <span className={totalCount > 0 && completedCount === totalCount ? 'pass-pill' : 'fail-pill'}>{totalCount > 0 && completedCount === totalCount ? 'Ready' : 'Incomplete'}</span>
-        </div>
-        <div className="checklist onboarding-checklist">
-          {readinessItems.length === 0 && <div className="fail"><span>•</span>No readiness checks loaded yet.</div>}
-          {readinessItems.map((i) => <div key={i.key} className={i.passed ? 'pass' : 'fail'}><span>{i.passed ? '✓' : '•'}</span><strong>{i.label}</strong></div>)}
-        </div>
-      </aside>
-    </section>
-
-    <section className="card form-stack onboarding-runtime-card">
-      <div className="onboarding-card-head">
-        <div>
-          <p className="eyebrow">Runtime engine proof</p>
-          <h3>Classify without creating a message</h3>
-        </div>
-        <span className="onboarding-required-badge">Test mode</span>
-      </div>
-      <label>Customer message<input value={message} onChange={(e) => setMessage(e.target.value)} /><small className="field-hint">Use a sample customer message to preview intent and routing behavior.</small></label>
-      <div className="onboarding-actions">
-        <button onClick={classify}>Classify message</button>
-        <span className="field-hint">This does not create an inbox conversation.</span>
-      </div>
-      {analysis && <RuntimeChatPreview message={message} analysis={analysis} />}
-    </section>
-  </section>;
 }
 
 function RuntimeChatPreview({ message, analysis }: { message: string; analysis: RuntimeClassification }) {
@@ -1654,6 +1442,10 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
   const [pendingArchive, setPendingArchive] = useState<KnowledgeItem | null>(null);
   const [pendingDelete, setPendingDelete] = useState<KnowledgeItem | null>(null);
   const [smartImportOpen, setSmartImportOpen] = useState(false);
+  const [importDirty, setImportDirty] = useState(false);
+  const importDirtyRef = useRef(false);
+  importDirtyRef.current = importDirty;
+  function closeImport() { if (!importDirtyRef.current || window.confirm('Close without saving your review? Unsaved corrections will be lost.')) {setSmartImportOpen(false); setImportDirty(false);} }
   const [form, setForm] = useState<KnowledgeFormState>(createDefaultKnowledgeForm);
 
   function openCreate() {
@@ -1939,23 +1731,32 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
   useEffect(() => {
     if (!smartImportOpen) return;
     const previousOverflow = document.body.style.overflow;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const dialog = document.querySelector<HTMLElement>('.smart-import-modal-window');
     document.body.style.overflow = 'hidden';
+    dialog?.querySelector<HTMLElement>('button')?.focus();
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setSmartImportOpen(false);
+      if (event.key === 'Escape') { event.preventDefault(); closeImport(); }
+      if (event.key !== 'Tab' || !dialog) return;
+      const fields = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, a[href]')).filter(el => el.offsetParent !== null);
+      const first = fields[0], last = fields[fields.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
+      previouslyFocused?.focus();
     };
   }, [smartImportOpen]);
 
   return <section className={`knowledge-shell ${(wizardOpen || smartImportOpen) ? 'modal-open' : ''}`}>
     <div className="knowledge-topbar knowledge-premium-topbar">
       <div className="knowledge-title-block">
-        <p className="eyebrow">Tenant knowledge base</p>
-        <h3>Knowledge & Responses</h3>
-        <p className="muted">Manage approved answers safely. The system still saves FAQ, intents, keywords, and routing behind the scenes, and replies in the customer&apos;s message language when that answer exists.</p>
+        <p className="eyebrow">Teach your agent</p>
+        <h3>Knowledge</h3>
+        <p className="muted">Give your agent clear answers and examples of customer questions. Choose when it should ask your team for help.</p>
       </div>
       <div className="knowledge-head-actions">
         <div className="knowledge-stats">
@@ -1965,8 +1766,8 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
         </div>
         <div className="knowledge-action-stack">
           <div className="knowledge-primary-actions">
-            <button onClick={openCreate}>Make new response</button>
-            <button type="button" className="secondary knowledge-import-trigger" onClick={() => setSmartImportOpen(true)}>Upload your messages</button>
+            <button onClick={openCreate}>Add an answer</button>
+            <button type="button" className="secondary knowledge-import-trigger" onClick={() => setSmartImportOpen(true)}>Import messages</button>
           </div>
           <p className="muted">Paste chats or upload files to generate drafts.</p>
         </div>
@@ -1975,7 +1776,7 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
 
     <div className="knowledge-controls">
       <label className="knowledge-search">Search approved answers
-        <input value={knowledgeSearch} onChange={(e) => setKnowledgeSearch(e.target.value)} placeholder="Search topic, answer, phrase, or intent" />
+        <input value={knowledgeSearch} onChange={(e) => setKnowledgeSearch(e.target.value)} placeholder="Search answers or customer questions" />
       </label>
       <div className="knowledge-filter-tabs" aria-label="Filter knowledge responses by status">
         {(['all', 'active', 'inactive', 'archived'] as const).map((filter) => <button key={filter} type="button" className={knowledgeStatusFilter === filter ? 'active' : ''} onClick={() => setKnowledgeStatusFilter(filter)}>
@@ -1993,20 +1794,15 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
           <div>
             <p className="eyebrow">Approved answer</p>
             <h3>{item.responseName}</h3>
-            <p className="knowledge-card-code">{item.topicKey}</p>
+
           </div>
           <div className="config-inline-meta">
             <span className="config-badge">{languageSummaryLabel(item.supportedLanguages)}</span>
             <span className={`config-status-pill ${item.status}`}>{item.status}</span>
           </div>
         </div>
-        <div className="knowledge-topic-strip">
-          <span>Intent {item.intentCode}</span>
-          <span>{item.responseMode === 'business_settings' ? 'Settings answer' : item.responseMode === 'custom' ? 'Custom answer' : 'FAQ answer'}</span>
-          <span>{item.faq ? `FAQ #${item.faq.id}` : 'No FAQ record'}</span>
-        </div>
         <details className="knowledge-training-panel">
-          <summary>Training & keywords</summary>
+          <summary>Example questions</summary>
           <div className="knowledge-training-grid">
             <div>
               <small>Arabic</small>
@@ -2247,18 +2043,18 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
 
     {smartImportOpen && typeof document !== 'undefined' && createPortal(
       <div className="smart-import-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="smart-import-title" onMouseDown={(event) => {
-        if (event.target === event.currentTarget) setSmartImportOpen(false);
+        if (event.target === event.currentTarget) closeImport();
       }}>
         <div className="smart-import-modal-window">
           <div className="smart-import-modal-head">
             <div>
               <p className="eyebrow">Smart import</p>
-              <h3 id="smart-import-title">Upload your messages</h3>
-              <p>Paste WhatsApp exports or upload TXT, CSV, or XLSX files. Nothing is saved until you approve.</p>
+              <h3 id="smart-import-title">Import messages</h3>
+              <p>Paste chats or upload files. Save a review to continue later; only approved items enter your knowledge.</p>
             </div>
-            <button type="button" className="secondary knowledge-close-button" onClick={() => setSmartImportOpen(false)}>Close</button>
+            <button type="button" className="secondary knowledge-close-button" onClick={closeImport}>Close</button>
           </div>
-          <SmartImportStudio token={token} tenantSlug={tenantSlug} reload={reload} intents={intents} />
+          <SmartImportStudio onDirtyChange={setImportDirty} token={token} tenantSlug={tenantSlug} reload={reload} intents={intents} />
         </div>
       </div>,
       document.body
@@ -2290,268 +2086,6 @@ function KnowledgeResponses({ faq, intents, routing, token, tenantSlug, reload }
   </section>;
 }
 
-type SmartImportFilter = 'all' | 'high' | 'review';
-
-function isHighConfidenceSmartRow(row: SmartImportRow) {
-  return row.confidence >= 0.8 && !row.warnings.includes('needs_review');
-}
-
-function SmartImportStudio({ token, tenantSlug, reload, intents }: { token: string; tenantSlug: string; reload: () => Promise<void>; intents: IntentItem[] }) {
-  const [pasteText, setPasteText] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<SmartImportPreview | null>(null);
-  const [rows, setRows] = useState<SmartImportRow[]>([]);
-  const [confidenceFilter, setConfidenceFilter] = useState<SmartImportFilter>('all');
-  const [loading, setLoading] = useState(false);
-  const [approving, setApproving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [resultMessage, setResultMessage] = useState<string | null>(null);
-  const approvedCount = rows.filter((row) => row.decision === 'approved').length;
-  const rejectedCount = rows.filter((row) => row.decision === 'rejected').length;
-  const highConfidenceCount = rows.filter((row) => isHighConfidenceSmartRow(row)).length;
-  const needsReviewCount = rows.filter((row) => !isHighConfidenceSmartRow(row)).length;
-  const existingIntentCodes = useMemo(() => new Set(intents.map((intent) => intent.code)), [intents]);
-  const visibleRows = rows.filter((row) => {
-    if (confidenceFilter === 'high') return isHighConfidenceSmartRow(row);
-    if (confidenceFilter === 'review') return !isHighConfidenceSmartRow(row);
-    return true;
-  });
-
-  async function runPreview(mode: 'paste' | 'file') {
-    setLoading(true);
-    setError(null);
-    setResultMessage(null);
-    try {
-      const next = mode === 'file'
-        ? file
-          ? await api.smartImportPreviewFile(token, tenantSlug, file)
-          : null
-        : await api.smartImportPreviewText(token, tenantSlug, { text: pasteText, source_type: 'paste' });
-      if (!next) {
-        setError('Choose a file to preview.');
-        return;
-      }
-      setPreview(next);
-      setRows(next.rows);
-      setConfidenceFilter('all');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to preview import.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function updateRow(rowId: string, patch: Partial<SmartImportRow>) {
-    setRows((current) => current.map((row) => row.row_id === rowId ? { ...row, ...patch } : row));
-  }
-
-  function updateEditable(rowId: string, patch: Partial<SmartImportRow['editable']>) {
-    setRows((current) => current.map((row) => row.row_id === rowId ? { ...row, editable: { ...row.editable, ...patch } } : row));
-  }
-
-  function resetImport() {
-    setPreview(null);
-    setRows([]);
-    setPasteText('');
-    setFile(null);
-    setError(null);
-    setResultMessage(null);
-    setConfidenceFilter('all');
-  }
-
-  async function confirmImport() {
-    setApproving(true);
-    setError(null);
-    setResultMessage(null);
-    try {
-      const items = rows.map((row) => {
-        const answer = row.editable.faq_answer.trim();
-        const answerIsArabic = /[\u0600-\u06FF]/.test(answer);
-        const correctedIntent = intents.find((intent) => intent.code === row.editable.intent_code);
-        return {
-          row_id: row.row_id,
-          decision: row.decision,
-          redacted_excerpt: row.redacted_excerpt,
-          normalized_text: row.normalized_text,
-          intent_code: row.editable.intent_code,
-          intent_label: correctedIntent?.label || row.editable.intent_code.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase()),
-          create_intent: row.editable.create_intent,
-          training_example_text: row.editable.training_example_text,
-          keyword_phrases: row.editable.keyword_phrases,
-          routing_behavior: row.editable.routing_behavior,
-          create_faq: row.editable.create_faq,
-          faq_topic_key: row.editable.faq_topic_key,
-          faq_question: row.editable.faq_question,
-          faq_answer_ar: answerIsArabic ? answer : '',
-          faq_answer_en: answerIsArabic ? '' : answer,
-        };
-      });
-      const result = await api.smartImportApprove(token, tenantSlug, {
-        source_type: preview?.source_type || 'preview',
-        total_rows: preview?.total_rows || rows.length,
-        items,
-      });
-      const duplicateSummary = preview?.duplicate_rows ? ` ${preview.duplicate_rows} duplicate rows were skipped during preview.` : '';
-      setResultMessage(`Saved ${result.approved_training_examples} training examples, ${result.approved_keywords} keywords, ${result.approved_faq_items} FAQ items, and ${result.approved_intents} intents. ${result.skipped_rows} rows skipped.${duplicateSummary}`);
-      await reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to confirm import.');
-    } finally {
-      setApproving(false);
-    }
-  }
-
-  return <section className="smart-import-studio">
-    <div className="smart-import-head">
-      <div>
-        <p className="eyebrow">Guided import flow</p>
-        <h3>Turn customer messages into reviewable drafts</h3>
-        <p className="muted">Preview first, approve only the useful suggestions, then import them into Knowledge & Responses.</p>
-      </div>
-      <div className="smart-import-summary">
-        <div><span>Previewed</span><strong>{rows.length}</strong></div>
-        <div><span>Approved</span><strong>{approvedCount}</strong></div>
-        <div><span>Rejected</span><strong>{rejectedCount}</strong></div>
-      </div>
-    </div>
-
-    <div className="smart-import-flow-steps" aria-label="Smart import workflow">
-      <div className="active"><span>1</span><strong>Paste or upload</strong><small>Add exported chats or files</small></div>
-      <div className={preview ? 'active' : ''}><span>2</span><strong>Preview suggestions</strong><small>Review confidence and warnings</small></div>
-      <div className={approvedCount > 0 ? 'active' : ''}><span>3</span><strong>Approve and import</strong><small>Save only selected drafts</small></div>
-    </div>
-
-    <div className="smart-import-input-grid">
-      <label>Paste raw chat or messages
-        <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={'[5/20/26, 9:01 AM] Customer: كم السعر؟\nCustomer: I want to register\nعندي شكوى'} />
-      </label>
-      <div className="smart-import-upload-panel">
-        <strong>Upload file</strong>
-        <p className="muted">Use one-column CSV, TXT exports, or XLSX when backend support is available. Files are previewed only and not stored permanently.</p>
-        <label className="smart-import-file-button">
-          <input type="file" accept=".txt,.csv,.xlsx,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] || null)} />
-          <span>{file ? file.name : 'Choose TXT, CSV, or XLSX'}</span>
-        </label>
-        <div className="button-row">
-          <button type="button" onClick={() => void runPreview('paste')} disabled={loading || !pasteText.trim()}>{loading ? 'Previewing...' : 'Preview pasted text'}</button>
-          <button type="button" className="secondary" onClick={() => void runPreview('file')} disabled={loading || !file}>{loading ? 'Previewing...' : 'Preview file'}</button>
-        </div>
-      </div>
-    </div>
-
-    {error && <div className="error-box">{error}</div>}
-    {resultMessage && <p className="success-text smart-import-result">{resultMessage}</p>}
-
-    <div className="smart-import-actions">
-      <div>
-        <strong>{preview ? `${preview.previewed_rows} suggestions ready` : 'No preview yet'}</strong>
-        <p className="muted">{preview ? `${preview.duplicate_rows} duplicates skipped from ${preview.total_rows} parsed rows. Preview cap: ${preview.max_rows}.` : 'Preview creates redacted drafts for admin review.'}</p>
-      </div>
-      <div className="smart-import-action-panel">
-        <div className="smart-import-filter-tabs" aria-label="Filter smart import suggestions">
-          {([
-            ['all', `All (${rows.length})`],
-            ['high', `High confidence (${highConfidenceCount})`],
-            ['review', `Needs review (${needsReviewCount})`],
-          ] as Array<[SmartImportFilter, string]>).map(([filter, label]) => <button key={filter} type="button" className={confidenceFilter === filter ? 'active' : ''} onClick={() => setConfidenceFilter(filter)} disabled={rows.length === 0}>{label}</button>)}
-        </div>
-        <button type="button" className="secondary" onClick={resetImport} disabled={loading || approving || (!preview && !pasteText && !file)}>Clear</button>
-        <button type="button" onClick={() => void confirmImport()} disabled={approving || approvedCount === 0}>{approving ? 'Importing...' : 'Confirm import'}</button>
-      </div>
-    </div>
-
-    {rows.length === 0 && <div className="smart-import-empty">
-      <span className="smart-import-empty-icon">1</span>
-      <strong>Start with a paste or file preview</strong>
-      <p className="muted">The studio redacts emails, phone numbers, and URLs, then suggests training examples, keywords, and FAQ drafts for approval. Nothing is saved until you confirm the import.</p>
-    </div>}
-
-    {rows.length > 0 && visibleRows.length === 0 && <div className="smart-import-empty compact">
-      <strong>No suggestions in this view</strong>
-      <p className="muted">Switch filters to review the remaining suggestions.</p>
-    </div>}
-
-    {visibleRows.length > 0 && <div className="smart-import-list">
-      {visibleRows.map((row) => {
-        const correctedIntentExists = existingIntentCodes.has(row.editable.intent_code);
-        const protectedIntent = row.warnings.includes('protected_handoff_intent') || ['COMPLAINT', 'HUMAN_REQUEST'].includes(row.suggested_intent.code);
-        const sensitiveIntent = !protectedIntent && ['PAYMENT_TRANSFER', 'CERTIFICATES'].includes(row.suggested_intent.code);
-        return <article className={`smart-import-row decision-${row.decision}`} key={row.row_id}>
-        <div className="smart-import-row-main">
-          <div>
-            <div className="smart-import-row-top">
-              <span className="config-badge">{row.detected_language.toUpperCase()}</span>
-              <span className={`smart-confidence ${row.confidence >= 0.8 ? 'high' : row.confidence >= 0.6 ? 'medium' : 'low'}`}>{Math.round(row.confidence * 100)}%</span>
-              <span className="config-badge secondary-pill">{row.editable.intent_code || row.suggested_intent.code}</span>
-              {correctedIntentExists ? <span className="config-status-pill active">Existing intent</span> : <span className="config-status-pill inactive">New intent candidate</span>}
-            </div>
-            <p className="smart-import-intent-note">{correctedIntentExists ? 'This will improve the existing intent with new examples and keywords.' : 'This can create a new intent only if you keep the checkbox enabled.'}</p>
-            <p className="smart-import-excerpt" dir="auto">{row.redacted_excerpt}</p>
-            <p className="smart-import-normalized" dir="auto">{row.normalized_text}</p>
-          </div>
-          <div className="smart-import-decision">
-            <button type="button" className={row.decision === 'approved' ? 'active' : ''} onClick={() => updateRow(row.row_id, { decision: row.decision === 'approved' ? 'pending' : 'approved' })}>Approve</button>
-            <button type="button" className={row.decision === 'rejected' ? 'active reject' : ''} onClick={() => updateRow(row.row_id, { decision: row.decision === 'rejected' ? 'pending' : 'rejected' })}>Reject</button>
-          </div>
-        </div>
-
-        <div className="smart-import-detail-grid">
-          <label>Existing intent
-            <select value={correctedIntentExists ? row.editable.intent_code : ''} onChange={(e) => {
-              const nextIntent = intents.find((intent) => intent.code === e.target.value);
-              updateEditable(row.row_id, {
-                intent_code: e.target.value,
-                faq_topic_key: nextIntent?.default_response_topic_key || row.editable.faq_topic_key,
-                create_intent: false,
-              });
-            }}>
-              <option value="">Custom / new intent</option>
-              {intents.map((intent) => <option key={intent.id} value={intent.code}>{intent.code} - {intent.label}</option>)}
-            </select>
-          </label>
-          <label>Intent code
-            <input value={row.editable.intent_code} onChange={(e) => updateEditable(row.row_id, { intent_code: normalizeIntentCode(e.target.value) })} />
-          </label>
-          <label>Keyword suggestions
-            <input value={row.editable.keyword_phrases.join(', ')} onChange={(e) => updateEditable(row.row_id, { keyword_phrases: e.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} />
-          </label>
-          <label>Training example
-            <input value={row.editable.training_example_text} onChange={(e) => updateEditable(row.row_id, { training_example_text: e.target.value })} />
-          </label>
-          <label>FAQ topic
-            <input value={row.editable.faq_topic_key} onChange={(e) => updateEditable(row.row_id, { faq_topic_key: normalizeTopicKey(e.target.value) })} placeholder="pricing" />
-          </label>
-          <label>Handoff behavior
-            <select value={protectedIntent ? 'immediate_handoff' : row.editable.routing_behavior} onChange={(e) => updateEditable(row.row_id, { routing_behavior: e.target.value })} disabled={protectedIntent}>
-              <option value="normal">Bot can answer normally</option>
-              <option value="offer_handoff">Offer handoff</option>
-              <option value="immediate_handoff">Immediate handoff</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="smart-import-options">
-          <label className="check-row"><input type="checkbox" checked={row.editable.create_intent} onChange={(e) => updateEditable(row.row_id, { create_intent: e.target.checked })} disabled={correctedIntentExists} /> Create new intent if missing</label>
-          <label className="check-row"><input type="checkbox" checked={row.editable.create_faq} onChange={(e) => updateEditable(row.row_id, { create_faq: e.target.checked })} /> Create FAQ item with approved answer</label>
-          {row.editable.create_faq && <label className="smart-import-answer">Official answer
-            <textarea value={row.editable.faq_answer} onChange={(e) => updateEditable(row.row_id, { faq_answer: e.target.value })} placeholder="Needs official answer" />
-          </label>}
-        </div>
-
-        <div className="smart-import-meta">
-          <span>{row.suggested_faq_topic?.existing ? `Links to FAQ: ${row.suggested_faq_topic.topic_key}` : row.suggested_faq_topic ? `FAQ draft: ${row.suggested_faq_topic.topic_key}` : 'No FAQ suggestion'}</span>
-          <span>{protectedIntent ? 'immediate_handoff' : row.editable.routing_behavior} · {row.routing_hint.reason}</span>
-        </div>
-        {protectedIntent && <div className="smart-import-safety-note">Protected handoff intent. Complaint and explicit human-request imports stay immediate handoff.</div>}
-        {sensitiveIntent && <div className="smart-import-safety-note warning">Sensitive topic. You can edit the suggested behavior, but this import will not change routing rules automatically.</div>}
-        {row.warnings.length > 0 && <div className="chip-cloud">
-          {row.warnings.map((warning) => <span key={warning} className="config-chip secondary-chip">{warning}</span>)}
-        </div>}
-      </article>;
-      })}
-    </div>}
-  </section>;
-}
 
 function Faq({ rows, token, tenantSlug, reload }: { rows: FaqItem[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -3158,813 +2692,6 @@ function Intents({ intents, faq, routing, token, tenantSlug, reload }: { intents
         </div>
       </div>
     </div>}
-  </section>;
-}
-
-function Channels({ rows, token, tenantSlug, reload }: { rows: Channel[]; token: string; tenantSlug: string; reload: () => Promise<void> }) {
-  const channelOptions = ['whatsapp', 'telegram', 'email', 'instagram', 'facebook', 'web_chat'];
-  const futureAdapters = new Set<string>();
-  const [channel, setChannel] = useState('whatsapp');
-  const [enabled, setEnabled] = useState('true');
-  const [liveSendEnabled, setLiveSendEnabled] = useState('false');
-  const [phoneNumberId, setPhoneNumberId] = useState('');
-  const [accessToken, setAccessToken] = useState('');
-  const [verifyToken, setVerifyToken] = useState('');
-  const [appSecret, setAppSecret] = useState('');
-  const [botToken, setBotToken] = useState('');
-  const [smtpHost, setSmtpHost] = useState('');
-  const [smtpPort, setSmtpPort] = useState('');
-  const [smtpUsername, setSmtpUsername] = useState('');
-  const [smtpPassword, setSmtpPassword] = useState('');
-  const [smtpFromEmail, setSmtpFromEmail] = useState('');
-  const [smtpFromName, setSmtpFromName] = useState('');
-  const [smtpUseTls, setSmtpUseTls] = useState('true');
-  const [smtpUseSsl, setSmtpUseSsl] = useState('false');
-  const [emailInboundSecret, setEmailInboundSecret] = useState('');
-  const [imapHost, setImapHost] = useState('');
-  const [imapPort, setImapPort] = useState('');
-  const [imapUsername, setImapUsername] = useState('');
-  const [imapPassword, setImapPassword] = useState('');
-  const [imapMailbox, setImapMailbox] = useState('');
-  const [imapUseSsl, setImapUseSsl] = useState('true');
-  const [metaPageAccessToken, setMetaPageAccessToken] = useState('');
-  const [metaAppSecret, setMetaAppSecret] = useState('');
-  const [metaVerifyToken, setMetaVerifyToken] = useState('');
-  const [metaWebhookSecret, setMetaWebhookSecret] = useState('');
-  const [metaPageId, setMetaPageId] = useState('');
-  const [metaInstagramBusinessAccountId, setMetaInstagramBusinessAccountId] = useState('');
-  const [metaGraphApiVersion, setMetaGraphApiVersion] = useState('');
-  const [savingChannel, setSavingChannel] = useState(false);
-  const [channelMessage, setChannelMessage] = useState<string | null>(null);
-  const [testConsoleOpen, setTestConsoleOpen] = useState(false);
-  const [testChannel, setTestChannel] = useState('web_chat');
-  const [testSessionId, setTestSessionId] = useState<string | null>(null);
-  const [testInput, setTestInput] = useState('');
-  const [testMessages, setTestMessages] = useState<Array<{ id: string; role: 'customer' | 'agent' | 'system'; text: string }>>([]);
-  const [testResult, setTestResult] = useState<ChannelTestConsoleResult | null>(null);
-  const [testError, setTestError] = useState<string | null>(null);
-  const [testingChannel, setTestingChannel] = useState(false);
-  const testInputRef = useRef<HTMLInputElement | null>(null);
-  const testInboxRef = useRef<HTMLDivElement | null>(null);
-
-  const configuredCount = rows.filter((row) => ['connected', 'configured', 'active'].includes(row.status)).length;
-  const credentialCount = rows.filter((row) => row.has_credentials).length;
-  const liveChannelCount = rows.filter((row) => !futureAdapters.has(row.channel_type) && row.public_config?.live_send_enabled === true).length;
-  const selectedChannelRow = rows.find((row) => row.channel_type === channel);
-  const selectedIsFutureAdapter = futureAdapters.has(channel);
-  const controlsLocked = selectedIsFutureAdapter;
-
-  const testableChannels = channelOptions.map((channelType) => {
-    const row = rows.find((item) => item.channel_type === channelType);
-    const implemented = !futureAdapters.has(channelType);
-    const enabledFlag = row?.public_config?.enabled === true;
-    const statusReady = row ? ['configured', 'connected', 'active'].includes(row.status) : false;
-    let reason = '';
-    if (!implemented) reason = 'Adapter not implemented';
-    else if (!row) reason = 'Not configured for this tenant';
-    else if (!enabledFlag) reason = 'Disabled for this tenant';
-    else if (!statusReady) reason = `Status: ${row.status}`;
-    return { channelType, row, available: implemented && Boolean(row) && enabledFlag && statusReady, reason };
-  });
-
-  useEffect(() => {
-    const firstAvailable = testableChannels.find((item) => item.available)?.channelType || 'web_chat';
-    if (!testableChannels.some((item) => item.channelType === testChannel && item.available)) {
-      setTestChannel(firstAvailable);
-    }
-  }, [rows, testChannel]);
-
-  useEffect(() => {
-    if (!testConsoleOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    window.setTimeout(() => testInputRef.current?.focus(), 80);
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setTestConsoleOpen(false);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [testConsoleOpen]);
-
-  useEffect(() => {
-    if (!testConsoleOpen) return;
-    const node = testInboxRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
-    if (!testingChannel) testInputRef.current?.focus();
-  }, [testMessages, testingChannel, testConsoleOpen]);
-
-  useEffect(() => {
-    const current = rows.find((row) => row.channel_type === channel);
-    const publicConfig = current?.public_config || {};
-    if (current) {
-      setEnabled(publicConfig.enabled === false ? 'false' : 'true');
-      setLiveSendEnabled(publicConfig.live_send_enabled === true ? 'true' : 'false');
-      setPhoneNumberId('');
-      setAccessToken('');
-      setVerifyToken('');
-      setAppSecret('');
-      setBotToken('');
-      setSmtpHost('');
-      setSmtpPort('');
-      setSmtpUsername('');
-      setSmtpPassword('');
-      setSmtpFromEmail('');
-      setSmtpFromName('');
-      setSmtpUseTls('true');
-      setSmtpUseSsl('false');
-      setEmailInboundSecret('');
-      setImapHost('');
-      setImapPort('');
-      setImapUsername('');
-      setImapPassword('');
-      setImapMailbox('');
-      setImapUseSsl('true');
-      setMetaPageAccessToken('');
-      setMetaAppSecret('');
-      setMetaVerifyToken('');
-      setMetaWebhookSecret('');
-      setMetaPageId('');
-      setMetaInstagramBusinessAccountId('');
-      setMetaGraphApiVersion('');
-      return;
-    }
-    if (channel === 'telegram') {
-      setEnabled('true');
-      setLiveSendEnabled('false');
-      setPhoneNumberId('');
-      setAccessToken('');
-      setVerifyToken('');
-      setAppSecret('');
-      setBotToken('');
-      setSmtpHost('');
-      setSmtpPort('');
-      setSmtpUsername('');
-      setSmtpPassword('');
-      setSmtpFromEmail('');
-      setSmtpFromName('');
-      setSmtpUseTls('true');
-      setSmtpUseSsl('false');
-      setEmailInboundSecret('');
-      setImapHost('');
-      setImapPort('');
-      setImapUsername('');
-      setImapPassword('');
-      setImapMailbox('');
-      setImapUseSsl('true');
-      setMetaPageAccessToken('');
-      setMetaAppSecret('');
-      setMetaVerifyToken('');
-      setMetaWebhookSecret('');
-      setMetaPageId('');
-      setMetaInstagramBusinessAccountId('');
-      setMetaGraphApiVersion('');
-      return;
-    }
-    if (channel === 'whatsapp') {
-      setEnabled('true');
-      setLiveSendEnabled('false');
-      setPhoneNumberId('');
-      setAccessToken('');
-      setVerifyToken('');
-      setAppSecret('');
-      setBotToken('');
-      setSmtpHost('');
-      setSmtpPort('');
-      setSmtpUsername('');
-      setSmtpPassword('');
-      setSmtpFromEmail('');
-      setSmtpFromName('');
-      setSmtpUseTls('true');
-      setSmtpUseSsl('false');
-      setEmailInboundSecret('');
-      setImapHost('');
-      setImapPort('');
-      setImapUsername('');
-      setImapPassword('');
-      setImapMailbox('');
-      setImapUseSsl('true');
-      setMetaPageAccessToken('');
-      setMetaAppSecret('');
-      setMetaVerifyToken('');
-      setMetaWebhookSecret('');
-      setMetaPageId('');
-      setMetaInstagramBusinessAccountId('');
-      setMetaGraphApiVersion('');
-      return;
-    }
-    setEnabled('false');
-    setLiveSendEnabled('false');
-    setPhoneNumberId('');
-    setAccessToken('');
-    setVerifyToken('');
-    setAppSecret('');
-    setBotToken('');
-    setSmtpHost('');
-    setSmtpPort('');
-    setSmtpUsername('');
-    setSmtpPassword('');
-    setSmtpFromEmail('');
-    setSmtpFromName('');
-    setSmtpUseTls('true');
-    setSmtpUseSsl('false');
-    setEmailInboundSecret('');
-    setImapHost('');
-    setImapPort('');
-    setImapUsername('');
-    setImapPassword('');
-    setImapMailbox('');
-    setImapUseSsl('true');
-    setMetaPageAccessToken('');
-    setMetaAppSecret('');
-    setMetaVerifyToken('');
-    setMetaWebhookSecret('');
-    setMetaPageId('');
-    setMetaInstagramBusinessAccountId('');
-    setMetaGraphApiVersion('');
-  }, [channel, rows]);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setSavingChannel(true);
-    setChannelMessage(null);
-    const publicConfig: Record<string, unknown> = {
-      ...(selectedChannelRow?.public_config || {}),
-      enabled: controlsLocked ? false : enabled === 'true',
-      live_send_enabled: controlsLocked ? false : liveSendEnabled === 'true',
-    };
-    const credentials: Record<string, unknown> = {};
-
-    if (channel === 'whatsapp') {
-      if (phoneNumberId.trim()) {
-        publicConfig.phone_number_id = phoneNumberId.trim();
-        credentials.phone_number_id = phoneNumberId.trim();
-      }
-      if (accessToken.trim()) credentials.access_token = accessToken.trim();
-      if (verifyToken.trim()) credentials.verify_token = verifyToken.trim();
-      if (appSecret.trim()) credentials.app_secret = appSecret.trim();
-    }
-
-    if (channel === 'telegram' && botToken.trim()) {
-      credentials.bot_token = botToken.trim();
-    }
-
-    if (channel === 'email') {
-      const hasEmailCredentialUpdate = [smtpHost, smtpPort, smtpUsername, smtpPassword, smtpFromEmail, smtpFromName, emailInboundSecret, imapHost, imapPort, imapUsername, imapPassword, imapMailbox].some((value) => value.trim());
-      if (hasEmailCredentialUpdate) {
-        if (smtpHost.trim()) credentials.smtp_host = smtpHost.trim();
-        if (smtpPort.trim()) credentials.smtp_port = smtpPort.trim();
-        if (smtpUsername.trim()) credentials.smtp_username = smtpUsername.trim();
-        if (smtpPassword.trim()) credentials.smtp_password = smtpPassword.trim();
-        if (smtpFromEmail.trim()) credentials.smtp_from_email = smtpFromEmail.trim();
-        if (smtpFromName.trim()) credentials.smtp_from_name = smtpFromName.trim();
-        if (emailInboundSecret.trim()) credentials.inbound_webhook_secret = emailInboundSecret.trim();
-        if (imapHost.trim()) credentials.imap_host = imapHost.trim();
-        if (imapPort.trim()) credentials.imap_port = imapPort.trim();
-        if (imapUsername.trim()) credentials.imap_username = imapUsername.trim();
-        if (imapPassword.trim()) credentials.imap_password = imapPassword.trim();
-        if (imapMailbox.trim()) credentials.imap_mailbox = imapMailbox.trim();
-        credentials.use_tls = smtpUseTls === 'true';
-        credentials.use_ssl = smtpUseSsl === 'true';
-        credentials.imap_use_ssl = imapUseSsl === 'true';
-      }
-    }
-
-    if (channel === 'instagram' || channel === 'facebook') {
-      const hasMetaCredentialUpdate = [
-        metaPageAccessToken,
-        metaAppSecret,
-        metaVerifyToken,
-        metaWebhookSecret,
-        metaPageId,
-        metaInstagramBusinessAccountId,
-        metaGraphApiVersion,
-      ].some((value) => value.trim());
-      if (hasMetaCredentialUpdate) {
-        if (metaPageAccessToken.trim()) credentials.page_access_token = metaPageAccessToken.trim();
-        if (metaAppSecret.trim()) credentials.app_secret = metaAppSecret.trim();
-        if (metaVerifyToken.trim()) credentials.verify_token = metaVerifyToken.trim();
-        if (metaWebhookSecret.trim()) credentials.webhook_secret = metaWebhookSecret.trim();
-        if (metaPageId.trim()) credentials.page_id = metaPageId.trim();
-        if (metaInstagramBusinessAccountId.trim()) credentials.instagram_business_account_id = metaInstagramBusinessAccountId.trim();
-        if (metaGraphApiVersion.trim()) credentials.graph_api_version = metaGraphApiVersion.trim();
-      }
-    }
-
-    try {
-      await api.saveChannel(token, tenantSlug, channel, { status: derivedSaveStatus(), public_config: publicConfig, credentials });
-      await reload();
-      setChannelMessage('Channel settings saved. Credential values remain hidden after storage.');
-    } finally {
-      setSavingChannel(false);
-    }
-  }
-
-  function derivedSaveStatus() {
-    const currentStatus = selectedChannelRow?.status || '';
-    const implementedReadyStatuses = new Set(['configured', 'connected', 'active']);
-    if (selectedIsFutureAdapter) return 'future';
-    if (enabled !== 'true') return currentStatus === 'future' ? 'future' : 'not_connected';
-    if (channel === 'web_chat') return 'configured';
-    if (channel === 'email') return 'configured';
-    if (channel === 'instagram' || channel === 'facebook') return 'configured';
-    if (channel === 'telegram') {
-      if (selectedChannelRow?.has_credentials || botToken.trim()) {
-        return implementedReadyStatuses.has(currentStatus) ? currentStatus : 'configured';
-      }
-      return currentStatus || 'not_connected';
-    }
-    if (channel === 'whatsapp') {
-      return implementedReadyStatuses.has(currentStatus) ? currentStatus : 'configured';
-    }
-    return currentStatus || 'not_connected';
-  }
-
-  function selectedPreviewRow(): Channel {
-    const base = selectedChannelRow || {
-      channel_type: channel,
-      status: 'not_connected',
-      public_config: {},
-      has_credentials: false,
-    };
-    return {
-      ...base,
-      status: derivedSaveStatus(),
-      public_config: {
-        ...(base.public_config || {}),
-        enabled: controlsLocked ? false : enabled === 'true',
-        live_send_enabled: controlsLocked ? false : liveSendEnabled === 'true',
-      },
-    };
-  }
-
-  function hasSafeConfigValue(row: Channel, key: string) {
-    const value = row.public_config?.[key];
-    return typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
-  }
-
-  function hiddenConfigured(value: boolean, missing = 'Not configured') {
-    return value ? 'Configured, hidden' : missing;
-  }
-
-  function channelLabel(channelType: string) {
-    if (channelType === 'web_chat') return 'Web Chat';
-    if (channelType === 'facebook') return 'Facebook Messenger';
-    return channelType.split('_').join(' ');
-  }
-
-  function channelHeadline(row: Channel) {
-    const enabledFlag = row.public_config?.enabled === true;
-    const liveFlag = row.public_config?.live_send_enabled === true;
-    const readyStatus = ['connected', 'configured', 'active'].includes(row.status);
-
-    if (row.channel_type === 'telegram') {
-      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'Demo channel ready';
-      if (enabledFlag && row.has_credentials) return 'Working for testing';
-      return enabledFlag ? 'Telegram setup pending' : 'Disabled for tenant';
-    }
-
-    if (row.channel_type === 'whatsapp') {
-      const hasRoutingId = Boolean(row.provider_channel_id) || hasSafeConfigValue(row, 'phone_number_id');
-      if (enabledFlag && liveFlag && row.has_credentials && hasRoutingId && readyStatus) return 'Meta credentials stored';
-      return 'Production channel pending';
-    }
-
-    if (row.channel_type === 'web_chat') {
-      if (enabledFlag && liveFlag && readyStatus) return 'Available for testing';
-      if (enabledFlag && readyStatus) return 'First-party demo channel';
-      return 'First-party demo setup pending';
-    }
-
-    if (row.channel_type === 'email') {
-      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'Production-connectable email channel';
-      if (enabledFlag && row.has_credentials && readyStatus) return 'SMTP and IMAP credentials stored';
-      return enabledFlag ? 'Email setup pending' : 'Disabled for tenant';
-    }
-
-    if (row.channel_type === 'instagram' || row.channel_type === 'facebook') {
-      if (enabledFlag && liveFlag && row.has_credentials && readyStatus) return 'Ready for testing after Meta setup';
-      if (enabledFlag && row.has_credentials && readyStatus) return 'Credential-ready Meta channel';
-      return enabledFlag ? 'Requires Meta app/page credentials' : 'Disabled for tenant';
-    }
-
-    return 'Future adapter';
-  }
-
-  function channelDescription(row: Channel) {
-    if (row.channel_type === 'telegram') return 'Telegram can be used for local/free demo testing.';
-    if (row.channel_type === 'whatsapp') return 'WhatsApp requires official Meta credentials before production live send.';
-    if (row.channel_type === 'web_chat') return 'First-party demo channel for tenant website testing. No external provider credentials required.';
-    if (row.channel_type === 'email') return 'SMTP outbound plus IMAP polling for production-capable inbound email.';
-    if (row.channel_type === 'instagram') return 'Meta social messaging channel. Live use may require Meta permissions, webhook setup, and app review.';
-    if (row.channel_type === 'facebook') return 'Meta social messaging channel. Live use may require Meta permissions, webhook setup, and app review.';
-    return 'Planned adapter. Credential setup is not available on this screen yet.';
-  }
-
-  function channelBadgeClass(row: Channel) {
-    const headline = channelHeadline(row);
-    if (headline.includes('ready') || headline.includes('Working') || headline === 'Meta credentials stored' || headline === 'Available for testing' || headline === 'Production-connectable email channel') return 'connected';
-    if (headline === 'Future adapter') return 'future';
-    if (row.public_config?.enabled === false) return 'disabled';
-    return 'pending';
-  }
-
-  function setupItems(row: Channel) {
-    const enabledFlag = row.public_config?.enabled === true;
-    const liveFlag = row.public_config?.live_send_enabled === true;
-    const statusReady = ['connected', 'configured', 'active'].includes(row.status);
-    const hasRoutingId = Boolean(row.provider_channel_id) || hasSafeConfigValue(row, 'phone_number_id');
-    const hasWabaId = Boolean(row.provider_account_id) || hasSafeConfigValue(row, 'waba_id');
-
-    if (row.channel_type === 'telegram') {
-      return [
-        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Disabled' },
-        { label: 'Bot credentials', value: row.has_credentials ? 'Stored securely' : 'Missing bot token' },
-        { label: 'Provider routing ID', value: hasRoutingId ? 'Configured, hidden' : 'Not required for polling/demo routing' },
-        { label: 'Live send', value: liveFlag ? 'Enabled for testing' : 'Off' },
-      ];
-    }
-
-    if (row.channel_type === 'whatsapp') {
-      return [
-        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Disabled' },
-        { label: 'Phone number ID', value: hiddenConfigured(hasRoutingId) },
-        { label: 'Access token', value: row.has_credentials ? 'Credential bundle stored; not itemized by API' : 'Not stored' },
-        { label: 'Verify token', value: row.has_credentials ? 'Credential bundle stored; not itemized by API' : 'Not stored' },
-        { label: 'App secret', value: row.has_credentials ? 'Credential bundle stored; not itemized by API' : 'Not stored' },
-        { label: 'WABA ID', value: hiddenConfigured(hasWabaId, 'Optional / not reported') },
-        { label: 'Live send', value: liveFlag ? 'Enabled' : 'Off until Meta setup is ready' },
-        { label: 'Public HTTPS webhook URL', value: 'Required later' },
-        { label: 'Approved templates', value: 'Required later' },
-      ];
-    }
-
-    if (row.channel_type === 'web_chat') {
-      return [
-        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Enable when ready' },
-        { label: 'Credentials', value: 'Not required' },
-        { label: 'Tenant endpoint', value: `/channels/web-chat/${tenantSlug}/message` },
-        { label: 'Visitor identity', value: 'Generated or supplied by widget' },
-        { label: 'Embed widget', value: 'Later' },
-        { label: 'Live send', value: liveFlag ? 'On for local/demo testing' : 'Off' },
-      ];
-    }
-
-    if (row.channel_type === 'email') {
-      return [
-        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Disabled' },
-        { label: 'SMTP credentials', value: row.has_credentials ? 'Stored securely' : 'Missing SMTP credentials' },
-        { label: 'Outbound send', value: liveFlag && row.has_credentials ? 'Ready when SMTP accepts mail' : 'Stored only until SMTP is ready' },
-        { label: 'Inbound test endpoint', value: `/channels/email/${tenantSlug}/inbound-test` },
-        { label: 'IMAP poll endpoint', value: `/channels/email/${tenantSlug}/poll-once` },
-        { label: 'Inbound secret', value: row.has_credentials ? 'Optional secret may be stored' : 'Optional for local testing' },
-        { label: 'Production inbound', value: row.has_credentials ? 'IMAP polling credentials can be stored' : 'Requires IMAP credentials' },
-      ];
-    }
-
-    if (row.channel_type === 'instagram' || row.channel_type === 'facebook') {
-      const accountLabel = row.channel_type === 'instagram' ? 'Instagram business account ID' : 'Page ID';
-      return [
-        { label: 'Runtime status', value: statusReady && enabledFlag ? 'Enabled' : enabledFlag ? `Status: ${row.status}` : 'Disabled' },
-        { label: 'Meta credentials', value: row.has_credentials ? 'Stored securely' : 'Missing Meta credentials' },
-        { label: accountLabel, value: row.has_credentials ? 'Stored securely if provided' : 'Required before live testing' },
-        { label: 'Inbound test endpoint', value: `/channels/${row.channel_type}/${tenantSlug}/inbound-test` },
-        { label: 'Real webhook endpoint', value: `/channels/${row.channel_type}/webhook` },
-        { label: 'Provider sender identity', value: 'Stored from inbound test sender ID' },
-        { label: 'Live send', value: liveFlag && row.has_credentials ? 'On after Meta setup' : 'Stored only until credentials are ready' },
-        { label: 'Meta permissions', value: 'May require webhook setup and app review' },
-      ];
-    }
-
-    return [
-      { label: 'Runtime status', value: 'Planned' },
-      { label: 'Credentials', value: 'Not supported yet' },
-      { label: 'Provider routing', value: 'Future adapter' },
-      { label: 'Live send', value: 'Unavailable' },
-    ];
-  }
-
-  function resetTestConsole() {
-    setTestSessionId(null);
-    setTestMessages([]);
-    setTestResult(null);
-    setTestError(null);
-    setTestInput('');
-  }
-
-  async function sendTestMessage(messageText: string) {
-    const message = messageText.trim();
-    if (!message || testingChannel) return;
-    const localId = `${Date.now()}`;
-    setTestingChannel(true);
-    setTestError(null);
-    setTestInput('');
-    setTestMessages((items) => [...items, { id: `customer-${localId}`, role: 'customer', text: message }]);
-    try {
-      const result = await api.testChannel(token, tenantSlug, { channel_type: testChannel, session_id: testSessionId, message });
-      setTestResult(result);
-      setTestSessionId(result.session_id);
-      setTestMessages((items) => [
-        ...items,
-        {
-          id: `agent-${localId}`,
-          role: result.reply ? 'agent' : 'system',
-          text: result.reply || (result.handoff ? 'No auto-reply. Conversation moved to human handoff.' : 'No auto-reply returned.'),
-        },
-      ]);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : 'Channel test failed';
-      setTestError(text);
-      setTestMessages((items) => [...items, { id: `system-${localId}`, role: 'system', text }]);
-    } finally {
-      setTestingChannel(false);
-      window.setTimeout(() => testInputRef.current?.focus(), 0);
-    }
-  }
-
-  async function submitTestMessage(e: FormEvent) {
-    e.preventDefault();
-    await sendTestMessage(testInput);
-  }
-
-  return <section className="channels-shell">
-    <div className="channels-hero">
-      <div>
-        <p className="eyebrow">Channel settings</p>
-        <h2>Tenant communication channels</h2>
-        <p className="muted">Manage channel availability, live-send posture, and encrypted provider credentials without exposing raw secret values.</p>
-      </div>
-      <div className="channels-hero-side">
-        <div className="channels-summary-grid" aria-label="Channel settings summary">
-          <div><span>Configured</span><strong>{configuredCount}</strong></div>
-          <div><span>Credentials</span><strong>{credentialCount}</strong></div>
-          <div><span>Live send</span><strong>{liveChannelCount}</strong></div>
-        </div>
-        <button className="channel-test-launch" type="button" onClick={() => setTestConsoleOpen(true)}>Test channel</button>
-      </div>
-    </div>
-
-    <div className="grid two channels-layout">
-      <form className="card form-stack channel-form-card" onSubmit={submit}>
-        <div className="channel-card-head">
-          <div>
-            <p className="eyebrow">Secure setup</p>
-            <h3>Tenant-scoped channel config</h3>
-            <p className="muted">Update one channel at a time. Existing credential-like values are masked and should only be replaced when rotating configuration.</p>
-          </div>
-          <span className={`channel-state-badge ${channelBadgeClass(selectedPreviewRow())}`}>{channelHeadline(selectedPreviewRow())}</span>
-        </div>
-        <div className="channel-form-grid">
-          <label>Channel
-            <span className="field-helper">Choose the tenant channel to configure.</span>
-            <select value={channel} onChange={(e) => setChannel(e.target.value)}>{channelOptions.map((option) => <option key={option} value={option}>{channelLabel(option)}</option>)}</select>
-          </label>
-          <div className="channel-readonly-status">
-            <span>Derived status</span>
-            <strong>{derivedSaveStatus()}</strong>
-            <p>Status is calculated from adapter support, enablement, credentials, routing, and live-send posture.</p>
-          </div>
-          <div className="two-field-row">
-            <div className={`channel-toggle-field ${controlsLocked ? 'disabled' : ''}`}>
-              <span>Enabled</span>
-              <span className="field-helper">Controls whether the tenant can use this channel.</span>
-              <button className={`toggle-switch ${enabled === 'true' ? 'on' : ''}`} type="button" role="switch" aria-checked={enabled === 'true'} disabled={controlsLocked} onClick={() => setEnabled(enabled === 'true' ? 'false' : 'true')}>
-                <span className="toggle-track"><i /></span>
-                <strong>{enabled === 'true' ? 'Enabled' : 'Disabled'}</strong>
-              </button>
-            </div>
-            <div className={`channel-toggle-field ${controlsLocked ? 'disabled' : ''}`}>
-              <span>Live send</span>
-              <span className="field-helper">Only enable after provider credentials and testing are ready.</span>
-              <button className={`toggle-switch ${liveSendEnabled === 'true' ? 'on' : ''}`} type="button" role="switch" aria-checked={liveSendEnabled === 'true'} disabled={controlsLocked} onClick={() => setLiveSendEnabled(liveSendEnabled === 'true' ? 'false' : 'true')}>
-                <span className="toggle-track"><i /></span>
-                <strong>{liveSendEnabled === 'true' ? 'On' : 'Off'}</strong>
-              </button>
-            </div>
-          </div>
-        </div>
-        {channel === 'whatsapp' && <div className="channel-secret-grid">
-          <label>Phone number ID
-            <span className="field-helper">Stored value is hidden. Enter a replacement only when updating this provider setting.</span>
-            <input type="password" placeholder={selectedChannelRow?.public_config?.phone_number_id ? 'Saved value hidden' : 'Enter provider value'} value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value)} autoComplete="off" />
-          </label>
-          <label>Access token
-            <span className="field-helper">Encrypted after save. The current token is never displayed.</span>
-            <input type="password" placeholder="Paste replacement token" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} autoComplete="off" />
-          </label>
-          <label>Verify token
-            <span className="field-helper">Encrypted after save and hidden from status cards.</span>
-            <input type="password" placeholder="Paste replacement verify token" value={verifyToken} onChange={(e) => setVerifyToken(e.target.value)} autoComplete="off" />
-          </label>
-          <label>App secret
-            <span className="field-helper">Encrypted after save. Do not share this outside the tenant admin workflow.</span>
-            <input type="password" placeholder="Paste replacement app secret" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} autoComplete="off" />
-          </label>
-        </div>}
-        {channel === 'telegram' && <div className="channel-secret-grid"><label>Bot token
-          <span className="field-helper">Encrypted after save. The current bot token is never displayed.</span>
-          <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste bot token'} value={botToken} onChange={(e) => setBotToken(e.target.value)} autoComplete="off" />
-        </label></div>}
-        {channel === 'email' && <div className="channel-secret-grid">
-          <label>SMTP host
-            <span className="field-helper">Encrypted after save. Enter a replacement only when updating email settings.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'smtp.example.com'} value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} autoComplete="off" />
-          </label>
-          <label>SMTP port
-            <span className="field-helper">Usually 587 for TLS or 465 for SSL.</span>
-            <input inputMode="numeric" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : '587'} value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} autoComplete="off" />
-          </label>
-          <label>SMTP username
-            <span className="field-helper">Encrypted after save and never shown back in the UI.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'SMTP username'} value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} autoComplete="off" />
-          </label>
-          <label>SMTP password
-            <span className="field-helper">Encrypted after save. The current password is never displayed.</span>
-            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'SMTP password'} value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} autoComplete="new-password" />
-          </label>
-          <label>From email
-            <span className="field-helper">The sender address used for tenant email replies.</span>
-            <input type="email" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'support@business.com'} value={smtpFromEmail} onChange={(e) => setSmtpFromEmail(e.target.value)} autoComplete="off" />
-          </label>
-          <label>From name
-            <span className="field-helper">Optional display name for outbound email.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Business Support'} value={smtpFromName} onChange={(e) => setSmtpFromName(e.target.value)} autoComplete="off" />
-          </label>
-          <label>Use TLS
-            <span className="field-helper">StartTLS is typical for port 587.</span>
-            <select value={smtpUseTls} onChange={(e) => setSmtpUseTls(e.target.value)}><option value="true">true</option><option value="false">false</option></select>
-          </label>
-          <label>Use SSL
-            <span className="field-helper">Usually true only for port 465.</span>
-            <select value={smtpUseSsl} onChange={(e) => setSmtpUseSsl(e.target.value)}><option value="false">false</option><option value="true">true</option></select>
-          </label>
-          <label>Inbound webhook secret
-            <span className="field-helper">Optional for provider-neutral inbound testing. Stored encrypted if entered.</span>
-            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Optional test secret'} value={emailInboundSecret} onChange={(e) => setEmailInboundSecret(e.target.value)} autoComplete="new-password" />
-          </label>
-          <label>IMAP host
-            <span className="field-helper">Used by the protected poll-once endpoint for production inbound email.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'imap.example.com'} value={imapHost} onChange={(e) => setImapHost(e.target.value)} autoComplete="off" />
-          </label>
-          <label>IMAP port
-            <span className="field-helper">Usually 993 for SSL.</span>
-            <input inputMode="numeric" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : '993'} value={imapPort} onChange={(e) => setImapPort(e.target.value)} autoComplete="off" />
-          </label>
-          <label>IMAP username
-            <span className="field-helper">Encrypted after save and never shown back in the UI.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'IMAP username'} value={imapUsername} onChange={(e) => setImapUsername(e.target.value)} autoComplete="off" />
-          </label>
-          <label>IMAP password
-            <span className="field-helper">Encrypted after save. The current password is never displayed.</span>
-            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'IMAP password'} value={imapPassword} onChange={(e) => setImapPassword(e.target.value)} autoComplete="new-password" />
-          </label>
-          <label>IMAP mailbox
-            <span className="field-helper">Defaults to INBOX when omitted.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'INBOX'} value={imapMailbox} onChange={(e) => setImapMailbox(e.target.value)} autoComplete="off" />
-          </label>
-          <label>IMAP SSL
-            <span className="field-helper">Usually true for port 993.</span>
-            <select value={imapUseSsl} onChange={(e) => setImapUseSsl(e.target.value)}><option value="true">true</option><option value="false">false</option></select>
-          </label>
-        </div>}
-        {(channel === 'instagram' || channel === 'facebook') && <div className="channel-secret-grid">
-          <label>Page access token
-            <span className="field-helper">Encrypted after save. The current token is never displayed.</span>
-            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste page access token'} value={metaPageAccessToken} onChange={(e) => setMetaPageAccessToken(e.target.value)} autoComplete="new-password" />
-          </label>
-          <label>App secret
-            <span className="field-helper">Encrypted after save and used for future Meta webhook signature checks.</span>
-            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste app secret'} value={metaAppSecret} onChange={(e) => setMetaAppSecret(e.target.value)} autoComplete="new-password" />
-          </label>
-          <label>Verify token
-            <span className="field-helper">Encrypted after save. Used later when enabling real Meta webhook verification.</span>
-            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Paste verify token'} value={metaVerifyToken} onChange={(e) => setMetaVerifyToken(e.target.value)} autoComplete="new-password" />
-          </label>
-          <label>Inbound test secret
-            <span className="field-helper">Optional provider-neutral test secret. Stored encrypted if entered.</span>
-            <input type="password" placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Optional test secret'} value={metaWebhookSecret} onChange={(e) => setMetaWebhookSecret(e.target.value)} autoComplete="new-password" />
-          </label>
-          <label>Page ID
-            <span className="field-helper">Required for Facebook Messenger live testing. Optional context for Instagram setup.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Meta page ID'} value={metaPageId} onChange={(e) => setMetaPageId(e.target.value)} autoComplete="off" />
-          </label>
-          <label>Instagram business account ID
-            <span className="field-helper">Required for Instagram live testing. Leave blank for Facebook-only setup.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'Instagram business account ID'} value={metaInstagramBusinessAccountId} onChange={(e) => setMetaInstagramBusinessAccountId(e.target.value)} autoComplete="off" />
-          </label>
-          <label>Graph API version
-            <span className="field-helper">Optional. Defaults safely on the backend when omitted.</span>
-            <input placeholder={selectedChannelRow?.has_credentials ? 'Saved value hidden' : 'v20.0'} value={metaGraphApiVersion} onChange={(e) => setMetaGraphApiVersion(e.target.value)} autoComplete="off" />
-          </label>
-        </div>}
-        {channel === 'telegram' && <div className="channel-help-note neutral"><strong>Testing channel</strong><p>Telegram can be used for local/free demo testing. A provider routing ID is not required unless a specific routing method is added later.</p></div>}
-        {channel === 'whatsapp' && <div className="channel-help-note"><strong>Production channel</strong><p>WhatsApp requires official Meta credentials before production live send. Saved values stay hidden and tenant-scoped.</p></div>}
-        {channel === 'web_chat' && <div className="channel-help-note neutral"><strong>First-party demo channel</strong><p>Use <code>/channels/web-chat/{tenantSlug}/message</code> with the tenant slug and a visitor ID. A full embeddable widget can be added later.</p></div>}
-        {channel === 'email' && <div className="channel-help-note neutral"><strong>Production-connectable email channel</strong><p>Use SMTP for outbound and the protected <code>/channels/email/{tenantSlug}/poll-once</code> endpoint for IMAP inbound polling. The inbound-test route remains available for local testing.</p></div>}
-        {(channel === 'instagram' || channel === 'facebook') && <div className="channel-help-note neutral"><strong>Credential-ready Meta channel</strong><p>Use <code>/channels/{channel}/{tenantSlug}/inbound-test</code> for provider-neutral testing. Live use may require Meta permissions, webhook setup, and app review.</p></div>}
-        {selectedIsFutureAdapter && <div className="channel-help-note neutral"><strong>Adapter not implemented yet</strong><p>This channel is represented in the platform roadmap, but live enablement is locked until a backend adapter exists.</p></div>}
-        {channelMessage && <p className="settings-status success">{channelMessage}</p>}
-        <div className="channel-form-actions">
-          <button disabled={savingChannel || controlsLocked}>{savingChannel ? 'Saving...' : controlsLocked ? 'Adapter not implemented' : 'Save encrypted config'}</button>
-        </div>
-      </form>
-
-      <div className="card channel-list-card">
-        <div className="channel-card-head">
-          <div>
-            <p className="eyebrow">Connection posture</p>
-            <h3>Channels</h3>
-            <p className="muted">Safe status overview only. Raw provider identifiers, tokens, and secrets are never shown here.</p>
-          </div>
-        </div>
-        <div className="channel-table">
-          {channelOptions.map((channelType) => {
-            const row = rows.find((item) => item.channel_type === channelType) || { channel_type: channelType, status: ['whatsapp', 'web_chat', 'email', 'instagram', 'facebook'].includes(channelType) ? 'configured' : channelType === 'telegram' ? 'not_connected' : 'future', public_config: {}, has_credentials: false };
-            const statusClass = channelBadgeClass(row);
-            const headline = channelHeadline(row);
-            return <div className="channel-status-card" key={row.channel_type}>
-              <div className="channel-status-head">
-                <div className={`status-dot ${statusClass === 'connected' ? 'on' : statusClass === 'future' ? 'idle' : 'off'}`} />
-                <div>
-                  <strong>{channelLabel(row.channel_type)}</strong>
-                  <p>{channelDescription(row)}</p>
-                </div>
-                <span className={`channel-state-badge ${statusClass}`}>{headline}</span>
-              </div>
-              <div className="channel-status-grid">
-                {setupItems(row).map((item) => <div key={`${row.channel_type}-${item.label}`}><small>{item.label}</small><span>{item.value}</span></div>)}
-              </div>
-            </div>;
-          })}
-        </div>
-      </div>
-    </div>
-    {testConsoleOpen && typeof document !== 'undefined' && createPortal(
-      <div className="channel-test-overlay" role="dialog" aria-modal="true" aria-labelledby="channel-test-title" onMouseDown={(event) => {
-        if (event.target === event.currentTarget) setTestConsoleOpen(false);
-      }}>
-        <div className="channel-test-window">
-          <div className="channel-test-titlebar">
-            <div>
-              <h3 id="channel-test-title">Channel Test Console</h3>
-              <p>Dry-run inbox for tenant-scoped agent replies.</p>
-            </div>
-            <button className="secondary" type="button" onClick={() => setTestConsoleOpen(false)}>Close</button>
-          </div>
-          <div className="channel-test-body">
-            <aside className="channel-test-sidebar">
-              <div>
-                <p className="eyebrow">Select channel</p>
-                <p className="muted">Only enabled, implemented tenant channels are available for dry-run testing.</p>
-              </div>
-              <div className="channel-test-picker">
-                {testableChannels.map((item) => <button
-                  type="button"
-                  key={item.channelType}
-                  disabled={!item.available || testingChannel}
-                  className={testChannel === item.channelType ? 'active' : ''}
-                  onClick={() => {
-                    setTestChannel(item.channelType);
-                    resetTestConsole();
-                  }}
-                >
-                  <span>{channelLabel(item.channelType)}</span>
-                  <small>{item.available ? channelHeadline(item.row as Channel) : item.reason}</small>
-                </button>)}
-              </div>
-              <button className="secondary" type="button" onClick={resetTestConsole} disabled={testingChannel}>Reset session</button>
-            </aside>
-            <div className="channel-test-inbox">
-              <div className="channel-test-status">
-                <div><span>Channel</span><strong>{channelLabel(testChannel)}</strong></div>
-                <div><span>State</span><strong>{testResult?.state || 'Ready'}</strong></div>
-                <div><span>Handoff</span><strong>{testResult ? (testResult.handoff ? 'Yes' : 'No') : 'No'}</strong></div>
-                <div><span>Last status</span><strong>{testError ? 'Rejected' : testingChannel ? 'Testing' : testResult ? 'Dry-run stored' : 'Idle'}</strong></div>
-              </div>
-              <div className="virtual-inbox" aria-live="polite" ref={testInboxRef}>
-                {testMessages.length === 0 ? <div className="channel-test-empty">
-                  <strong>Start a virtual customer chat</strong>
-                  <p>Messages are stored with a synthetic test identity and outbound provider APIs are bypassed.</p>
-                </div> : testMessages.map((item) => <div className={`test-bubble ${item.role}`} key={item.id}>
-                  <span>{item.role === 'customer' ? 'Customer' : item.role === 'agent' ? 'Agent' : 'System'}</span>
-                  <p>{item.text}</p>
-                  {item.role === 'system' && testResult?.handoff && item.text.includes('human handoff') && <button className="return-to-bot-button" type="button" onClick={() => void sendTestMessage('bot')} disabled={testingChannel}>Return to bot</button>}
-                </div>)}
-              </div>
-              {testError && <p className="settings-status error">{testError}</p>}
-              <form className="channel-test-compose" onSubmit={submitTestMessage}>
-                <input ref={testInputRef} value={testInput} onChange={(event) => setTestInput(event.target.value)} placeholder="Type a fake customer message..." disabled={testingChannel} />
-                <button type="submit" disabled={testingChannel || !testInput.trim()}>{testingChannel ? 'Testing...' : 'Send test'}</button>
-              </form>
-              <p className="channel-test-footnote">Session: {testSessionId || 'new'} · Source: channel_test_console · No secrets or raw provider payloads shown.</p>
-            </div>
-          </div>
-        </div>
-      </div>,
-      document.body
-    )}
   </section>;
 }
 

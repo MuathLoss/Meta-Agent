@@ -118,6 +118,7 @@ export type SmartImportRow = {
     routing_behavior: string;
     create_intent: boolean;
     create_faq: boolean;
+    apply_routing?: boolean;
   };
 };
 export type SmartImportPreview = {
@@ -130,6 +131,10 @@ export type SmartImportPreview = {
   notes: string[];
 };
 export type SmartImportApproveResult = {
+  job_id: number;
+  revision: number;
+  approved_routing_rules: number;
+  skipped_duplicates: number;
   status: string;
   approved_training_examples: number;
   approved_keywords: number;
@@ -166,13 +171,15 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   if (!(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
   if (options.tenantSlug) headers.set('X-Tenant-Slug', options.tenantSlug);
+  const supportReason = sessionStorage.getItem('supportAccessReason');
+  if (options.token && supportReason) headers.set('X-Support-Access-Reason', supportReason);
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const text = await res.text();
     let detail: string | null = null;
     try {
-      const parsed = JSON.parse(text) as { detail?: string };
-      detail = parsed.detail || null;
+      const parsed = JSON.parse(text) as { detail?: string | Array<{msg?: string}> };
+      detail = Array.isArray(parsed.detail) ? parsed.detail.map(e => e.msg || 'Invalid value').join('. ') : parsed.detail || null;
     } catch {}
     throw new Error(detail || text || `Request failed with ${res.status}`);
   }
@@ -181,7 +188,7 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
 }
 
 export function login(email: string, password: string, tenantSlug: string) {
-  return request<SessionState>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, tenant_slug: tenantSlug }) });
+  return request<SessionState>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, tenant_slug: tenantSlug || undefined }) });
 }
 export function signupBusiness(payload: { business_name: string; tenant_slug: string; admin_name: string; admin_email: string; admin_password: string; support_email?: string; support_phone?: string; timezone?: string; default_lang?: string }) {
   return request<SessionState>('/auth/signup-business', { method: 'POST', body: JSON.stringify(payload) });
@@ -190,10 +197,23 @@ export function getMe(token: string) { return request<SessionState['user'] & { m
 
 function auth(token: string, tenantSlug: string): Pick<ApiOptions, 'token' | 'tenantSlug'> { return { token, tenantSlug }; }
 
+export type ImportJobSummary = {id: number; title: string; source_type: string; status: string; revision: number; row_count: number; updated_at?: string | null; result?: Record<string, unknown>};
+export type ImportJob = ImportJobSummary & {preview: SmartImportPreview | null; rows: SmartImportRow[]};
+export type ImportDraft = {title: string; source_type: string; revision?: number; preview: SmartImportPreview; rows: SmartImportRow[]};
+export type ImportGrouping = {assisted: boolean; message: string; groups: Array<{label: string; row_ids: string[]}>};
+export type ChannelHealth = {channel_type: string; ready: boolean; checks: Array<{key: string; label: string; passed: boolean}>; missing: string[]; automatic_polling?: boolean | null; verification?: {status: string; message: string; checked_at?: string} | null};
 export const api = {
+  importJobs: (token: string, tenantSlug: string) => request<ImportJobSummary[]>('/imports/smart/jobs', auth(token, tenantSlug)),
+  importJob: (token: string, tenantSlug: string, id: number) => request<ImportJob>(`/imports/smart/jobs/${id}`, auth(token, tenantSlug)),
+  createImportJob: (token: string, tenantSlug: string, data: ImportDraft) => request<ImportJob>('/imports/smart/jobs', {method: 'POST', body: JSON.stringify(data), ...auth(token, tenantSlug)}),
+  updateImportJob: (token: string, tenantSlug: string, id: number, data: ImportDraft) => request<ImportJob>(`/imports/smart/jobs/${id}`, {method: 'PUT', body: JSON.stringify(data), ...auth(token, tenantSlug)}),
+  undoImportJob: (token: string, tenantSlug: string, id: number, revision: number) => request<ImportJobSummary>(`/imports/smart/jobs/${id}/undo`, {method: 'POST', body: JSON.stringify({revision}), ...auth(token, tenantSlug)}),
+  groupImportJob: (token: string, tenantSlug: string, id: number) => request<ImportGrouping>(`/imports/smart/jobs/${id}/assist`, {method: 'POST', ...auth(token, tenantSlug)}),
+  channelReadiness: (token: string, tenantSlug: string) => request<ChannelHealth[]>('/channels/readiness', auth(token, tenantSlug)),
+  verifyChannel: (token: string, tenantSlug: string, kind: string) => request<{status: string; message: string; checked_at: string}>(`/channels/${kind}/verify`, {method: 'POST', ...auth(token, tenantSlug)}),
   tenant: (token: string, tenantSlug: string) => request<TenantProfile>('/tenants/current', auth(token, tenantSlug)),
   readiness: (token: string, tenantSlug: string) => request<Readiness>('/onboarding/readiness', auth(token, tenantSlug)),
-  publish: (token: string, tenantSlug: string) => request<{ status: string }>('/onboarding/publish', { method: 'POST', ...auth(token, tenantSlug) }),
+  publish: (token: string, tenantSlug: string) => request<{ published: boolean }>('/onboarding/publish', { method: 'POST', ...auth(token, tenantSlug) }),
   analytics: (token: string, tenantSlug: string) => request<Analytics>('/dashboard/analytics/summary', auth(token, tenantSlug)),
   inbox: (token: string, tenantSlug: string) => request<InboxItem[]>('/dashboard/inbox', auth(token, tenantSlug)),
   conversation: (token: string, tenantSlug: string, id: number) => request<ConversationDetail>(`/dashboard/conversations/${id}`, auth(token, tenantSlug)),
@@ -251,7 +271,7 @@ export const api = {
     body.append('file', file);
     return request<SmartImportPreview>('/imports/smart/preview-file', { method: 'POST', body, ...auth(token, tenantSlug) });
   },
-  smartImportApprove: (token: string, tenantSlug: string, payload: { source_type: string; total_rows: number; items: Array<Record<string, unknown>> }) => request<SmartImportApproveResult>('/imports/smart/approve', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
+  smartImportApprove: (token: string, tenantSlug: string, payload: { job_id?: number; revision?: number; source_type: string; total_rows: number; items: Array<Record<string, unknown>> }) => request<SmartImportApproveResult>('/imports/smart/approve', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   auditLogs: (token: string, tenantSlug: string) => request<AuditLog[]>('/audit-logs', auth(token, tenantSlug)),
   previewInbound: (token: string, tenantSlug: string, text: string, customer_phone = '0500000000') => request<{ decision: Record<string, unknown> }>('/dashboard/preview/inbound', { method: 'POST', body: JSON.stringify({ customer_phone, text, channel_type: 'whatsapp' }), ...auth(token, tenantSlug) }),
   saveOnboardingStep: (token: string, tenantSlug: string, step: number, data: Record<string, unknown>) => request<{ saved: boolean; step: number }>("/onboarding/step/" + step, { method: "POST", body: JSON.stringify({ data }), ...auth(token, tenantSlug) }),

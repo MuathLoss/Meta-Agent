@@ -133,7 +133,6 @@ class OnboardingService:
         return created
 
     def readiness(self, db: Session, tenant: Tenant) -> dict:
-        self.ensure_default_routing_rules(db, tenant)
         branch_count = db.query(func.count(Branch.id)).filter(Branch.tenant_id == tenant.id, Branch.is_active.is_(True)).scalar() or 0
         admin_count = db.query(func.count(TenantUserRole.id)).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.role_code == "BUSINESS_ADMIN", TenantUserRole.is_active.is_(True)).scalar() or 0
         ops_count = db.query(func.count(TenantUserRole.id)).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.role_code.in_(["BUSINESS_ADMIN", "OPERATIONS_STAFF"]), TenantUserRole.is_active.is_(True)).scalar() or 0
@@ -142,7 +141,9 @@ class OnboardingService:
         routes = {r.intent_code for r in db.query(RoutingRule).filter(RoutingRule.tenant_id == tenant.id).all()}
         missing = [normalize_intent_code(i.code) for i in intents if normalize_intent_code(i.code) not in routes]
         brand = db.query(TenantBrand).filter(TenantBrand.tenant_id == tenant.id).first()
-        whatsapp = db.query(ChannelConfig).filter(ChannelConfig.tenant_id == tenant.id, ChannelConfig.channel_type == "whatsapp").first()
+        from app.services.channel_health_service import readiness as channel_readiness
+        channels = db.query(ChannelConfig).filter(ChannelConfig.tenant_id == tenant.id).all()
+        channel_ready = any(channel_readiness(row).get("ready") for row in channels)
         items = [
             {"key": "business_profile", "label": "Business profile and brand exist", "passed": bool(tenant.display_name and tenant.timezone and tenant.default_lang and brand)},
             {"key": "branches", "label": "At least one branch exists", "passed": branch_count > 0},
@@ -150,7 +151,7 @@ class OnboardingService:
             {"key": "faq", "label": "Active FAQ content exists", "passed": faq_count > 0},
             {"key": "intents", "label": "Enabled intents exist", "passed": len(intents) > 0},
             {"key": "routing", "label": "Every enabled intent has routing", "passed": len(intents) > 0 and not missing, "detail": ", ".join(missing) if missing else None},
-            {"key": "channel_whatsapp", "label": "Tenant WhatsApp channel config exists", "passed": bool(whatsapp)},
+            {"key": "channel", "label": "At least one channel has its required details and is enabled", "passed": channel_ready},
         ]
         return {"is_ready": all(i["passed"] for i in items), "items": items}
 

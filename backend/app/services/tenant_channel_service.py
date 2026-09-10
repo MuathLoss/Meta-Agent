@@ -125,7 +125,23 @@ class TenantChannelService:
         if not row:
             row = ChannelConfig(tenant_id=tenant_id, channel_type=channel_type)
             db.add(row)
-        provider_channel_id, provider_account_id = self.routing_keys(channel_type, public_config)
+        merged_public = {**(row.public_config_json or {}), **(public_config or {})}
+        merged_public.pop("connection_check", None)
+        saved_credentials = self.credentials(row) if row.encrypted_credentials else {}
+        merged_credentials = {**saved_credentials, **{k: v for k, v in (credentials or {}).items() if v is not None and v != ""}}
+        routing_config = {**merged_credentials, **merged_public}
+        if channel_type == "whatsapp":
+            phone_id = ((credentials or {}).get("phone_number_id") or (public_config or {}).get("phone_number_id")
+                        or (public_config or {}).get("provider_channel_id") or row.provider_channel_id
+                        or merged_credentials.get("phone_number_id") or merged_public.get("phone_number_id"))
+            if phone_id:
+                routing_config["provider_channel_id"] = phone_id
+                merged_credentials["phone_number_id"] = phone_id
+                if "phone_number_id" in merged_public:
+                    merged_public["phone_number_id"] = phone_id
+                if "provider_channel_id" in merged_public:
+                    merged_public["provider_channel_id"] = phone_id
+        provider_channel_id, provider_account_id = self.routing_keys(channel_type, routing_config)
         if provider_channel_id:
             duplicate = (
                 db.query(ChannelConfig)
@@ -141,9 +157,9 @@ class TenantChannelService:
         row.status = status
         row.provider_channel_id = str(provider_channel_id) if provider_channel_id else None
         row.provider_account_id = str(provider_account_id) if provider_account_id else None
-        row.public_config_json = public_config or {}
-        if credentials:
-            row.encrypted_credentials = self.encrypt_credentials(credentials)
+        row.public_config_json = merged_public
+        if credentials or merged_credentials != saved_credentials:
+            row.encrypted_credentials = self.encrypt_credentials(merged_credentials)
         db.flush()
         return row
 

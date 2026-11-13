@@ -81,6 +81,16 @@ class ResponseEngine:
             tenant_default_lang=tenant.default_lang,
         ) or "Thanks for your message. We received it outside working hours and will reply during business hours."
 
+    def handoff_acknowledgement(self, tenant: Tenant, preferred_lang: str | None = None) -> str:
+        return self.select_localized_text(
+            {
+                "ar": "تم تحويل طلبك إلى فريقنا، وسيرد عليك أحد الموظفين في أقرب وقت ممكن.",
+                "en": "I've passed your request to our team. A team member will reply as soon as possible.",
+            },
+            preferred_lang=preferred_lang,
+            tenant_default_lang=tenant.default_lang,
+        ) or "I've passed your request to our team. A team member will reply as soon as possible."
+
     def handoff_offer_clarification(self, tenant: Tenant, preferred_lang: str | None = None) -> str:
         return self.select_localized_text(
             {

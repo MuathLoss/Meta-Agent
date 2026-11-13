@@ -22,6 +22,8 @@ bash scripts/staging.sh stop
 
 Backups include the database and uploads. The restore check imports the database archive into a temporary database, verifies its schema, and deletes only that temporary database. Keep `.env.staging` in secure backup too: its encryption key is required to open saved credentials and import reviews. Protect backups as carefully as live customer data. The local backup command is manual; retention, off-device storage, and scheduling must be configured when hosting is chosen.
 
+The backend runs as an unprivileged user; only its uploads folder is writable. The API reference is off in staging (see `API_DOCS_ENABLED` in [environment](environment.md)). Staging uses a fixed private network, `172.28.88.0/24`, so the backend can trust the visitor addresses its proxy forwards. If that range clashes with another network on the machine, set `STAGING_SUBNET` in `.env.staging` to a free private range.
+
 Container health checks run automatically, and logs rotate at 10 MB with three files per service. `scripts/staging_smoke.py` checks the UI, API liveness, and database readiness and exits unsuccessfully if any check fails. It can be connected to a host's monitor later. No external alert service is configured yet.
 
 ## Preparing for a hosted pilot

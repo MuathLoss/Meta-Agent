@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type Channel, type ChannelHealth, type ChannelTestConsoleResult } from '../services/api';
+import { WebChatWidget } from './WebChatWidget';
 
 type Field = { key: string; label: string; hint?: string; secret?: boolean; optional?: boolean };
 const metaFields: Field[] = [
@@ -9,7 +10,7 @@ const metaFields: Field[] = [
 ];
 const definitions: Record<string, {name: string; intro: string; fields: Field[]; link?: string}> = {
   telegram: {name:'Telegram',intro:'Open the official BotFather in Telegram, choose your bot, and copy its current API token. Local startup checks for new messages while it is running.',link:'https://core.telegram.org/bots#how-do-i-create-a-bot',fields:[{key:'bot_token',label:'Bot token',secret:true,hint:'If the old token was rejected, paste a new token from BotFather here.'}]},
-  web_chat: {name:'Web chat',intro:'No provider account is needed for a virtual test. A website widget still needs to be connected before visitors can use it.',fields:[]},
+  web_chat: {name:'Web chat',intro:'No provider account is needed. Enable web chat here, then add the chat to your website in step 4 below.',fields:[]},
   whatsapp: {name:'WhatsApp',intro:'Use your WhatsApp Business account details from the Meta developer dashboard. Public HTTPS hosting and webhook setup are needed for real inbound messages.',link:'https://developers.facebook.com/docs/whatsapp/cloud-api/get-started',fields:[{key:'phone_number_id',label:'Phone number ID'},{key:'access_token',label:'Access token',secret:true},...metaFields.filter(f=>f.key!=='page_access_token')]},
   email: {name:'Email',intro:'Use the sending (SMTP) and receiving (IMAP) settings supplied by your email provider. An app password may be needed.',fields:[{key:'smtp_host',label:'Sending server (SMTP)',hint:'For example, smtp.your-provider.com'},{key:'smtp_username',label:'Sending username'},{key:'smtp_password',label:'Sending password',secret:true},{key:'smtp_from_email',label:'Sender email'},{key:'imap_host',label:'Receiving server (IMAP)'},{key:'imap_username',label:'Receiving username'},{key:'imap_password',label:'Receiving password',secret:true}]},
   instagram: {name:'Instagram',intro:'Connect your professional Instagram account through your Meta app. Public HTTPS hosting, a subscribed webhook, and the required messaging permissions are needed.',link:'https://developers.facebook.com/docs/instagram-platform',fields:[{key:'instagram_business_account_id',label:'Instagram business account ID'},...metaFields]},
@@ -71,5 +72,6 @@ export function ChannelsPage({rows,token,tenantSlug,reload}:{rows:Channel[];toke
         <form className="card form-stack" onSubmit={testReply}><div className="step-heading"><span>3</span><div><h3>Try an answer</h3><p className="muted">A virtual test. Nothing is added to your inbox or sent to a provider.</p></div></div><label>Customer message<textarea value={message} onChange={e=>{setMessage(e.target.value);setTest(null);}} maxLength={4000}/></label><button className="secondary" disabled={!!busy||!virtualReady||!message.trim()||dirty}>{busy==='test'?'Testing…':'Preview reply'}</button>{!virtualReady&&<small className="muted">Save and enable this channel to run a virtual test.</small>}{test&&<div className="test-answer" role="status"><strong>{test.handoff?'Team handoff':'Agent reply'}</strong><p dir="auto">{test.reply||'A team member takes over. No automatic answer.'}</p></div>}</form>
       </aside>
     </div>
+    {kind==='web_chat'&&<WebChatWidget token={token} tenantSlug={tenantSlug} refreshKey={row}/>}
   </section>;
 }

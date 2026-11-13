@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api import routes_auth, routes_onboarding, routes_channels, routes_dashboard, routes_broadcasts, routes_webhook, routes_config, routes_operations, routes_runtime, routes_uat, routes_deployment, routes_acceptance, routes_imports
+from app.api import routes_auth, routes_onboarding, routes_channels, routes_dashboard, routes_broadcasts, routes_webhook, routes_config, routes_operations, routes_runtime, routes_uat, routes_deployment, routes_acceptance, routes_imports, routes_widget
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.services.email_polling_scheduler import EmailPollingBackgroundTask
@@ -35,7 +35,15 @@ async def lifespan(app: FastAPI):
             logger.info("email polling background task stopped")
 
 
-app = FastAPI(title="Configurable Multi-Tenant Business Agent Platform", version="0.7.0", lifespan=lifespan)
+api_docs_visible = settings.api_docs_visible
+app = FastAPI(
+    title="Configurable Multi-Tenant Business Agent Platform",
+    version="0.7.0",
+    lifespan=lifespan,
+    docs_url="/docs" if api_docs_visible else None,
+    redoc_url="/redoc" if api_docs_visible else None,
+    openapi_url="/openapi.json" if api_docs_visible else None,
+)
 uploads_dir = Path(__file__).resolve().parent / "uploads"
 uploads_dir.mkdir(parents=True, exist_ok=True)
 
@@ -63,7 +71,10 @@ app.add_middleware(
 async def security_headers(request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+    # Pages that state their own allowed embedders (the website chat frame) are framed
+    # only where that policy allows; everything else may never be framed.
+    if "frame-ancestors" not in response.headers.get("Content-Security-Policy", ""):
+        response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Cache-Control", "no-store")
     return response
@@ -95,6 +106,7 @@ app.include_router(routes_runtime.router)
 app.include_router(routes_uat.router)
 app.include_router(routes_deployment.router)
 app.include_router(routes_imports.router)
+app.include_router(routes_widget.router)
 
 app.include_router(routes_acceptance.router)
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")

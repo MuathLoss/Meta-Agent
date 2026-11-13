@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import unquote
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
@@ -56,6 +56,14 @@ ALLOWED_LOGO_TYPES = {
 
 def audit(db: Session, tenant_id: int, actor_id: int | None, action: str, entity_type: str, entity_id: str | None, details: dict | None = None) -> None:
     db.add(AuditLog(tenant_id=tenant_id, actor_user_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id, details_json=details or {}))
+
+
+def is_tenant_member(db: Session, tenant_id: int, user_id: int) -> bool:
+    return db.query(TenantUserRole.id).filter(TenantUserRole.tenant_id == tenant_id, TenantUserRole.user_id == user_id).first() is not None
+
+
+def is_member_of_another_tenant(db: Session, tenant_id: int, user_id: int) -> bool:
+    return db.query(TenantUserRole.id).filter(TenantUserRole.tenant_id != tenant_id, TenantUserRole.user_id == user_id).first() is not None
 
 
 def ensure_brand(db: Session, tenant_id: int) -> TenantBrand:
@@ -128,7 +136,16 @@ def normalize_topic_key(value: str) -> str:
     return value.strip().lower().replace(" ", "_").replace("-", "_")
 
 
-def default_routing_payload(intent_code: str, default_response_topic_key: str | None = None) -> dict:
+AUTO_HANDOFF_REASON = "custom_intent_without_default_response"
+
+
+def intent_has_custom_response(intent: IntentDefinition) -> bool:
+    if (intent.response_mode or "").lower() != "custom":
+        return False
+    return bool((intent.custom_response_ar or "").strip() or (intent.custom_response_en or "").strip())
+
+
+def default_routing_payload(intent_code: str, default_response_topic_key: str | None = None, has_custom_response: bool = False) -> dict:
     code = normalize_intent_code(intent_code)
 
     bot_intents = {
@@ -178,7 +195,9 @@ def default_routing_payload(intent_code: str, default_response_topic_key: str | 
             "priority": "normal",
         }
 
-    if code in bot_intents or default_response_topic_key:
+    # A topic with its own written answer is answered by the agent, like a topic
+    # that points at an approved answer. Protected handoff topics are decided above.
+    if code in bot_intents or default_response_topic_key or has_custom_response:
         return {
             "intent_code": code,
             "primary_owner_role": "BOT",
@@ -193,21 +212,31 @@ def default_routing_payload(intent_code: str, default_response_topic_key: str | 
         "intent_code": code,
         "primary_owner_role": ROLE_OPERATIONS_STAFF,
         "notify_roles_json": [],
-        "escalation_json": {"reason": "custom_intent_without_default_response"},
+        "escalation_json": {"reason": AUTO_HANDOFF_REASON},
         "handoff_required": True,
         "ticket_type": "handoff",
         "priority": "normal",
     }
 
 
-def ensure_routing_rule_for_intent(db: Session, tenant_id: int, intent: IntentDefinition, actor_id: int | None = None) -> RoutingRule | None:
+def ensure_routing_rule_for_intent(db: Session, tenant_id: int, intent: IntentDefinition, actor_id: int | None = None, *, correct_untouched_default: bool = False) -> RoutingRule | None:
     if not intent.enabled:
         return None
     code = normalize_intent_code(intent.code)
+    has_custom_response = intent_has_custom_response(intent)
     existing = db.query(RoutingRule).filter(RoutingRule.tenant_id == tenant_id, RoutingRule.intent_code == code).first()
     if existing:
+        # Earlier versions sent every topic with a written answer to staff without
+        # replying. Correct that only while the rule is still the automatic default;
+        # a rule an admin saved carries their own choices and is left alone.
+        untouched_default = (existing.escalation_json or {}) == {"reason": AUTO_HANDOFF_REASON}
+        if correct_untouched_default and has_custom_response and untouched_default:
+            data = default_routing_payload(code, intent.default_response_topic_key, has_custom_response)
+            for key, value in data.items():
+                setattr(existing, key, value)
+            audit(db, tenant_id, actor_id, "routing_rule.auto_corrected", "routing_rule", code, data)
         return existing
-    data = default_routing_payload(code, intent.default_response_topic_key)
+    data = default_routing_payload(code, intent.default_response_topic_key, has_custom_response)
     row = RoutingRule(tenant_id=tenant_id, **data)
     db.add(row)
     db.flush()
@@ -385,7 +414,6 @@ def update_profile(payload: TenantProfileUpdate, tenant: Tenant = Depends(get_cu
 
 @router.post("/settings/profile/logo")
 async def upload_profile_logo(
-    request: Request,
     file: UploadFile = File(...),
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
@@ -419,7 +447,8 @@ async def upload_profile_logo(
     brand.logo_url = logo_url
     audit(db, tenant.id, ctx["user"].id, "settings.profile.logo_uploaded", "tenant", str(tenant.id), {"logo_url": logo_url, "stored_filename": filename})
     db.commit()
-    return {"status": "uploaded", "logo_url": str(request.base_url).rstrip("/") + logo_url}
+    # Same relative form as the saved profile, so it works behind any proxy or domain.
+    return {"status": "uploaded", "logo_url": logo_url}
 
 
 @router.get("/settings/business")
@@ -498,8 +527,13 @@ def create_staff(payload: StaffCreate, tenant: Tenant = Depends(get_current_tena
         user = User(email=str(payload.email).lower(), full_name=payload.full_name, password_hash=hash_password(payload.password), is_platform_admin=False)
         db.add(user); db.flush()
     else:
-        user.full_name = payload.full_name or user.full_name
-    for role in payload.roles:
+        # An existing account belongs to its owner. Until there is an invitation
+        # the person accepts, another workspace must not attach or rename it.
+        if user.is_platform_admin or not is_tenant_member(db, tenant.id, user.id):
+            raise HTTPException(status_code=409, detail="This email address already has an account. Use a different email address.")
+        if payload.full_name and not is_member_of_another_tenant(db, tenant.id, user.id):
+            user.full_name = payload.full_name
+    for role in dict.fromkeys(payload.roles):
         exists = db.query(TenantUserRole).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.user_id == user.id, TenantUserRole.role_code == role).first()
         if not exists:
             db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code=role, is_active=True))
@@ -512,11 +546,13 @@ def create_staff(payload: StaffCreate, tenant: Tenant = Depends(get_current_tena
 
 @router.put("/staff/{user_id}/roles")
 def replace_staff_roles(user_id: int, payload: StaffRoleUpdate, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), ctx: dict = Depends(require_tenant_roles(*ADMIN_ROLES))):
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    if not set(payload.roles).issubset(set(STAFF_ROLES)):
+        raise HTTPException(status_code=400, detail="Unknown role in request")
+    # Roles can only be changed for people who already belong to this workspace.
+    if not db.get(User, user_id) or not is_tenant_member(db, tenant.id, user_id):
+        raise HTTPException(status_code=404, detail="Staff member not found for this tenant")
     db.query(TenantUserRole).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.user_id == user_id).delete()
-    for role in payload.roles:
+    for role in dict.fromkeys(payload.roles):
         db.add(TenantUserRole(tenant_id=tenant.id, user_id=user_id, role_code=role, is_active=payload.is_active))
     audit(db, tenant.id, ctx["user"].id, "staff.roles.replaced", "user", str(user_id), payload.model_dump())
     db.commit()
@@ -654,7 +690,7 @@ def update_intent(intent_id: int, payload: IntentUpdate, tenant: Tenant = Depend
         row.custom_response_ar = None
         row.custom_response_en = None
     if row.enabled:
-        ensure_routing_rule_for_intent(db, tenant.id, row, ctx["user"].id)
+        ensure_routing_rule_for_intent(db, tenant.id, row, ctx["user"].id, correct_untouched_default=True)
     audit(db, tenant.id, ctx["user"].id, "intent.updated", "intent_definition", str(row.id), data)
     db.commit()
     return {"status": "updated"}

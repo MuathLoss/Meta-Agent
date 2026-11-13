@@ -1,3 +1,5 @@
+import pytest
+
 from app.models.entities import IntentDefinition, IntentKeyword, RoutingRule
 from app.services.intent_rules import IntentRules, normalize_text
 from app.services.language_service import LanguageService
@@ -85,6 +87,24 @@ def test_location_matches_arabic_without_punctuation(db, tenant):
     result = IntentRules().classify(db, tenant.id, "وين موقعكم؟", language_hint="ar")
     assert result.intent_code == "LOCATION"
     assert result.confidence >= 0.9
+
+
+@pytest.mark.parametrize(
+    ("message", "lang"),
+    [
+        ("I want to talk to a person", "en"),
+        ("can I speak to someone please", "en"),
+        ("I need to speak with a staff member", "en"),
+        ("let me talk to the manager", "en"),
+        ("أبي أكلم أحد", "ar"),
+        ("ابغى اكلم شخص حقيقي", "ar"),
+        ("ابي المسؤول", "ar"),
+    ],
+)
+def test_common_ways_of_asking_for_a_person_are_recognised(db, tenant, message, lang):
+    result = IntentRules().classify(db, tenant.id, message, language_hint=lang)
+    assert result.intent_code == "HUMAN_REQUEST"
+    assert result.needs_clarification is False
 
 
 def test_random_nonsense_stays_unknown(db, tenant):

@@ -3,6 +3,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PRODUCTION_ENVS = {"production", "staging"}
 PLACEHOLDER_MARKERS = ("changeme", "replace-me", "replace-with", "pending")
+# Sign-in tokens are signed with HMAC-SHA256; a shorter key can be guessed offline.
+MIN_APP_SECRET_KEY_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -18,6 +20,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     tenant_channel_secret_key: str
     allow_unsigned_webhooks_in_dev: bool = True
+    api_docs_enabled: bool | None = None
     email_polling_enabled: bool = False
     email_poll_interval_seconds: int = 60
     ollama_enabled: bool = False
@@ -35,6 +38,14 @@ class Settings(BaseSettings):
     @property
     def is_production_like(self) -> bool:
         return self.app_env.strip().lower() in PRODUCTION_ENVS
+
+    @property
+    def api_docs_visible(self) -> bool:
+        # The interactive API reference and schema are a development aid. They stay
+        # off in staging/production unless API_DOCS_ENABLED is set on purpose.
+        if self.api_docs_enabled is not None:
+            return self.api_docs_enabled
+        return not self.is_production_like
 
     def configured(self, value: object) -> bool:
         if value is None:
@@ -58,6 +69,9 @@ class Settings(BaseSettings):
         for key, value in required_secret_fields.items():
             if not self.configured(value):
                 errors.append(f"{key} is not safely configured")
+
+        if self.configured(self.app_secret_key) and len(self.app_secret_key.strip()) < MIN_APP_SECRET_KEY_LENGTH:
+            errors.append(f"APP_SECRET_KEY must be at least {MIN_APP_SECRET_KEY_LENGTH} characters")
 
         try:
             self.cors_allowed_origins_list

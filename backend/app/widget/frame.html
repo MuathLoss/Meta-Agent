@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="__LANG__" dir="__DIR__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>__TITLE__</title>
+<link rel="stylesheet" href="__CSS_URL__">
+<script id="widget-config" type="application/json">__CONFIG_JSON__</script>
+<script src="__JS_URL__" defer></script>
+</head>
+<body>
+<div class="chat" role="dialog" aria-labelledby="chat-title">
+  <header class="chat-header">
+    <img id="chat-logo" class="chat-logo" alt="" hidden>
+    <div class="chat-heading">
+      <h1 id="chat-title"></h1>
+      <p id="chat-subtitle"></p>
+    </div>
+    <button id="chat-close" class="icon-button" type="button">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+    </button>
+  </header>
+  <div id="chat-log" class="chat-log" role="log" aria-live="polite" aria-relevant="additions"></div>
+  <p id="chat-status" class="chat-status" role="status" hidden></p>
+  <form id="chat-form" class="chat-form" novalidate>
+    <textarea id="chat-input" rows="1" maxlength="4000" autocomplete="off" dir="auto"></textarea>
+    <button id="chat-send" class="send-button" type="submit">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3.4 20.4 21 12 3.4 3.6 3.3 10l12.6 2-12.6 2z" fill="currentColor"/></svg>
+    </button>
+  </form>
+</div>
+</body>
+</html>

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from app.models.entities import AuditLog, Conversation, Customer, Message, Tenant, Ticket
 from app.services.customer_channel_identity_service import CustomerChannelIdentityService
-from app.services.intent_rules import IntentRules, normalize_text
+from app.services.intent_rules import IntentRules, asks_for_a_person, normalize_text
 from app.services.language_service import LanguageService
 from app.services.ollama_intelligence_service import OllamaIntelligenceService
 from app.services.outbound_service import OutboundService
@@ -15,6 +15,7 @@ class ConversationOrchestrator:
     SPAM_HANDOFF_THRESHOLD = 5
     SPAM_HANDOFF_COOLDOWN_SECONDS = 60
     HANDOFF_AUTO_RETURN_SECONDS = 60
+    STAFF_REPLY_HOLD_SECONDS = 15 * 60
     HANDOFF_CONFIRMATION_STATE = "WAITING_FOR_HANDOFF_CONFIRMATION"
 
     def __init__(self):
@@ -48,7 +49,8 @@ class ConversationOrchestrator:
 
     def _is_explicit_human_request(self, text: str) -> bool:
         normalized = self._normalized(text)
-        return normalized in {"ابغي موظف", "ابغى موظف", "اكلم موظف", "ابغي انسان", "ابغى انسان", "ابغى موظف", "human", "representative"}
+        # Works in every workspace, whether or not it has a "human request" topic.
+        return normalized in {"ابغي موظف", "ابغى موظف", "اكلم موظف", "ابغي انسان", "ابغى انسان", "human", "representative"} or asks_for_a_person(text)
 
     def _is_explicit_complaint(self, text: str) -> bool:
         normalized = self._normalized(text)
@@ -94,6 +96,24 @@ class ConversationOrchestrator:
             self._now() + timedelta(seconds=self.HANDOFF_AUTO_RETURN_SECONDS)
         ).isoformat()
         conversation.metadata_json = metadata
+
+    def hold_for_team(self, conversation: Conversation) -> bool:
+        """A team member just replied: keep the bot quiet so it cannot interrupt them.
+
+        The conversation stays with the team for STAFF_REPLY_HOLD_SECONDS after each staff
+        reply (instead of the short wait used when nobody has answered yet). Returns True
+        when the conversation was with the bot and has now moved to the team.
+        """
+        taken_over = conversation.state != "HUMAN_HANDOFF"
+        if taken_over:
+            conversation.state = "HUMAN_HANDOFF"
+            conversation.owner_type = "role"
+            conversation.owner_ref = "OPERATIONS_STAFF"
+        self._clear_pending_handoff_confirmation(conversation)
+        metadata = self._conversation_metadata(conversation)
+        metadata["handoff_auto_return_at"] = (self._now() + timedelta(seconds=self.STAFF_REPLY_HOLD_SECONDS)).isoformat()
+        conversation.metadata_json = metadata
+        return taken_over
 
     def _clear_handoff_timeout(self, conversation: Conversation) -> None:
         metadata = self._conversation_metadata(conversation)
@@ -257,6 +277,22 @@ class ConversationOrchestrator:
         self._clear_pending_handoff_confirmation(conversation)
         self._set_handoff_timeout(conversation)
         self._add_audit(db, tenant_id=tenant_id, action=action, entity_id=conversation.id, details=details)
+
+    def _acknowledge_handoff(self, db: Session, *, tenant: Tenant, conversation: Conversation, customer: Customer, channel_type: str, response_lang: str | None) -> dict:
+        # Sent once, at the moment a conversation moves to the team, so the customer
+        # is not left without any answer. Later messages during the handoff stay silent.
+        reply = self.response_engine.handoff_acknowledgement(tenant, preferred_lang=response_lang)
+        out = self.outbound_service.send_or_store(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            channel_type=channel_type,
+            destination=self.customer_identity.delivery_address(customer, channel_type),
+            text=reply,
+            intent_code="HANDOFF_ACKNOWLEDGEMENT",
+        )
+        out.payload_json = {**(out.payload_json or {}), "system_event": "handoff_acknowledgement"}
+        return {"auto_reply": reply, "outbound_message_id": out.id}
 
     def _switch_to_bot(self, db: Session, *, tenant_id: int, conversation: Conversation, action: str, details: dict | None = None) -> None:
         conversation.state = "BOT_ACTIVE"
@@ -500,8 +536,9 @@ class ConversationOrchestrator:
                 action="conversation.handoff_confirmed",
                 details={"intent": pending.get("intent_code"), "channel_type": channel_type},
             )
+            ack = self._acknowledge_handoff(db, tenant=tenant, conversation=conversation, customer=customer, channel_type=channel_type, response_lang=response_lang)
             db.commit()
-            return {"status": "handoff", "ticket_id": ticket.id, "auto_reply": None, "reason": "handoff_confirmed"}
+            return {"status": "handoff", "ticket_id": ticket.id, **ack, "reason": "handoff_confirmed"}
 
         if self._is_confirmation_no(text):
             self._switch_to_bot(
@@ -683,8 +720,9 @@ class ConversationOrchestrator:
                 assigned_to="OPERATIONS_STAFF",
                 details_json={"text": text, "intent": "HUMAN_REQUEST"},
             )
+            ack = self._acknowledge_handoff(db, tenant=tenant, conversation=conversation, customer=customer, channel_type=channel_type, response_lang=language.resolved_lang)
             db.commit()
-            return {"status": "handoff", "ticket_id": ticket.id, "auto_reply": None}
+            return {"status": "handoff", "ticket_id": ticket.id, **ack}
 
         if self._is_explicit_complaint(text) or (intent.intent_code == "COMPLAINT" and not intent.needs_clarification):
             self._switch_to_handoff(db, tenant_id=tenant.id, conversation=conversation, owner_ref="OPERATIONS_STAFF", action="conversation.handoff_complaint", details={"text": text, "channel_type": channel_type})
@@ -698,8 +736,9 @@ class ConversationOrchestrator:
                 assigned_to="OPERATIONS_STAFF",
                 details_json={"text": text, "intent": "COMPLAINT"},
             )
+            ack = self._acknowledge_handoff(db, tenant=tenant, conversation=conversation, customer=customer, channel_type=channel_type, response_lang=language.resolved_lang)
             db.commit()
-            return {"status": "handoff", "ticket_id": ticket.id, "auto_reply": None}
+            return {"status": "handoff", "ticket_id": ticket.id, **ack}
 
         if intent.intent_code == "UNKNOWN" or intent.mixed or intent.needs_clarification:
             dynamic_fallback = self._try_dynamic_business_info_fallback(
@@ -737,8 +776,9 @@ class ConversationOrchestrator:
                         assigned_to="OPERATIONS_STAFF",
                         details_json={"text": text, "unclear_count": unclear_count, "cooldown_until": cooldown_until.isoformat()},
                     )
+                    ack = self._acknowledge_handoff(db, tenant=tenant, conversation=conversation, customer=customer, channel_type=channel_type, response_lang=language.resolved_lang)
                     db.commit()
-                    return {"status": "handoff", "ticket_id": ticket.id, "auto_reply": None, "reason": "spam_threshold_reached"}
+                    return {"status": "handoff", "ticket_id": ticket.id, **ack, "reason": "spam_threshold_reached"}
             conversation.state = "CLARIFYING"
             reply = intent.clarification_question or self.response_engine.clarification_question(tenant, preferred_lang=language.resolved_lang)
             out = self.outbound_service.send_or_store(
@@ -811,8 +851,9 @@ class ConversationOrchestrator:
                 assigned_to=route.owner_role,
                 details_json={"intent": intent.intent_code, "notify_roles": route.notify_roles},
             )
+            ack = self._acknowledge_handoff(db, tenant=tenant, conversation=conversation, customer=customer, channel_type=channel_type, response_lang=language.resolved_lang)
             db.commit()
-            return {"status": "handoff", "intent": intent.__dict__, "route": route.__dict__, "ticket_id": ticket.id, "auto_reply": None}
+            return {"status": "handoff", "intent": intent.__dict__, "route": route.__dict__, "ticket_id": ticket.id, **ack}
 
         reply = self.response_engine.build_response(
             db,

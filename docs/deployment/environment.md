@@ -23,10 +23,26 @@ OLLAMA_TIMEOUT_SECONDS=10
 
 Production and staging must use real secret-manager values, not placeholders
 such as `changeme`, `replace-me`, `replace-with`, `pending`, or empty strings.
+`APP_SECRET_KEY` signs every sign-in token and must be at least 32 random
+characters (for example `python -c "import secrets; print(secrets.token_hex(32))"`);
+the backend refuses to start in staging or production with a shorter key.
 Do not commit real secrets to source control.
 
 `CORS_ALLOWED_ORIGINS` must be an explicit comma-separated list in staging and
 production. Do not use `*` outside local development.
+
+`API_DOCS_ENABLED` controls the interactive API reference (`/docs`, `/redoc`,
+`/openapi.json`). Leave it unset: the reference is on in development and off in
+staging and production. Set it to `true` only for a deliberate, temporary need.
+
+`FORWARDED_ALLOW_IPS` tells the backend which proxy addresses it may trust for
+the visitor's real address (`X-Forwarded-For`). Set it to the address range of
+your own reverse proxies and nothing wider. Without it, every request appears to
+come from the proxy, so sign-in, signup and chat rate limits are shared by all
+visitors. Never set it to `*` when the backend port is reachable from the
+internet, because visitors could then choose their own address and avoid the limits.
+Local staging sets it to its private Docker network (`STAGING_SUBNET`, default
+`172.28.88.0/24`).
 
 ## Tenant channel configuration
 

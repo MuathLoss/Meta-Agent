@@ -109,7 +109,7 @@ def test_web_chat_tenant_isolation_with_same_visitor_id(db, tenant):
     assert db.query(Customer).filter(Customer.phone.like("webchat:%:same-visitor")).count() == 2
 
 
-def test_web_chat_human_handoff_does_not_auto_reply(db, tenant):
+def test_web_chat_human_handoff_acknowledges_once_then_stays_silent(db, tenant):
     enable_web_chat(db, tenant)
 
     result = receive_web_chat_message(
@@ -119,6 +119,17 @@ def test_web_chat_human_handoff_does_not_auto_reply(db, tenant):
         db=db,
     )
 
-    assert result["reply"] is None
+    assert result["reply"] == "I've passed your request to our team. A team member will reply as soon as possible."
     assert result["handoff"] is True
     assert result["state"] == "HUMAN_HANDOFF"
+
+    followup = receive_web_chat_message(
+        tenant.slug,
+        WebChatMessageRequest(visitor_id="handoff-visitor", message="are you there?", display_name=None),
+        FakeRequest(),
+        db=db,
+    )
+
+    assert followup["reply"] is None
+    assert followup["handoff"] is True
+    assert followup["state"] == "HUMAN_HANDOFF"

@@ -87,24 +87,34 @@ def test_console_message(
     confidence = float(intent_payload.get("confidence") or 0) if isinstance(intent_payload, dict) else 0.0
     needs_clarification = bool(intent_payload.get("needs_clarification")) if isinstance(intent_payload, dict) else True
     route_action = str(route_payload.get("action") or "CLARIFY") if isinstance(route_payload, dict) else "CLARIFY"
+    language_payload = preview.get("language") if isinstance(preview, dict) else None
+    reply_lang = language_payload.get("resolved_lang") if isinstance(language_payload, dict) else None
+    response_engine = test_console_orchestrator.response_engine
 
+    # Mirror real conversations: clear requests for a person or complaints hand off
+    # even when the workspace has no matching topic.
+    if intent not in {"HUMAN_REQUEST", "COMPLAINT"}:
+        if test_console_orchestrator._is_explicit_human_request(message):
+            intent = "HUMAN_REQUEST"
+        elif test_console_orchestrator._is_explicit_complaint(message):
+            intent = "COMPLAINT"
     if intent in {"HUMAN_REQUEST", "COMPLAINT"} or route_action in {"HANDOFF", "TICKET"}:
         state = "HUMAN_HANDOFF"
-        reply = None
+        reply = response_engine.handoff_acknowledgement(tenant, preferred_lang=reply_lang)
         handoff = True
     elif intent == "UNKNOWN" or needs_clarification or confidence < 0.67:
         state = "CLARIFYING"
-        reply = test_console_orchestrator.response_engine.clarification_question(tenant)
+        reply = response_engine.clarification_question(tenant, preferred_lang=reply_lang)
         handoff = False
     else:
         state = "BOT_ACTIVE"
-        reply = test_console_orchestrator.response_engine.build_response(
+        reply = response_engine.build_response(
             db,
             tenant,
             intent,
             faq_topic_key=intent_payload.get("faq_topic_key") if isinstance(intent_payload, dict) else None,
-            preferred_lang=(preview.get("language") or {}).get("resolved_lang") if isinstance(preview.get("language"), dict) else None,
-        ) or test_console_orchestrator.response_engine.clarification_question(tenant)
+            preferred_lang=reply_lang,
+        ) or response_engine.clarification_question(tenant, preferred_lang=reply_lang)
         handoff = False
 
     return ChannelTestConsoleResponse(

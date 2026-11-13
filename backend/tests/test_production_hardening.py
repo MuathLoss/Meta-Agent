@@ -54,6 +54,31 @@ def test_placeholder_production_secret_is_reported_safely():
     assert "db.internal" not in str(errors)
 
 
+def test_short_production_secret_is_rejected_without_revealing_it():
+    def errors_for(secret: str) -> list[str]:
+        return make_settings(
+            app_env="production",
+            cors_allowed_origins="https://dashboard.example.test",
+            app_secret_key=secret,
+            database_url="postgresql+psycopg://user:pass@db.internal/app",
+            tenant_channel_secret_key="real-tenant-channel-secret",
+        ).production_config_errors()
+
+    short_errors = errors_for("short-but-real-secret")
+    assert "APP_SECRET_KEY must be at least 32 characters" in short_errors
+    assert "short-but-real-secret" not in str(short_errors)
+    assert errors_for("a" * 64) == []
+    assert make_settings(app_env="development", app_secret_key="dev").production_config_errors() == []
+
+
+def test_api_docs_are_hidden_outside_development_unless_enabled_on_purpose():
+    assert make_settings(app_env="development").api_docs_visible is True
+    assert make_settings(app_env="staging").api_docs_visible is False
+    assert make_settings(app_env="production").api_docs_visible is False
+    assert make_settings(app_env="staging", api_docs_enabled=True).api_docs_visible is True
+    assert make_settings(app_env="development", api_docs_enabled=False).api_docs_visible is False
+
+
 def test_readiness_db_failure_response_is_safe(monkeypatch):
     class BrokenSession:
         def __enter__(self):

@@ -158,6 +158,15 @@ export type HandoffPackage = { tenant: string; product: string; status: string; 
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
+export type WidgetSettings = { allowed_websites: string[]; welcome_ar: string; welcome_en: string; language: 'auto' | 'ar' | 'en'; position: 'right' | 'left' };
+export type WidgetSettingsResult = { workspace: string; settings: WidgetSettings; status: { channel_enabled: boolean; workspace_published: boolean; has_websites: boolean } };
+
+// Full address of the API as websites will reach it, used in the chat code institutions paste.
+export function widgetBaseUrl() {
+  const base = /^https?:\/\//i.test(API_BASE) ? API_BASE : `${window.location.origin}${API_BASE.startsWith('/') ? '' : '/'}${API_BASE}`;
+  return base.replace(/\/+$/, '');
+}
+
 export function resolveAssetUrl(path?: string | null) {
   if (!path) return null;
   if (/^https?:\/\//i.test(path) || path.startsWith('data:')) return path;
@@ -165,6 +174,61 @@ export function resolveAssetUrl(path?: string | null) {
 }
 
 type ApiOptions = RequestInit & { token?: string; tenantSlug?: string };
+
+type ValidationIssue = { type?: string; loc?: Array<string | number>; msg?: string; ctx?: Record<string, unknown> };
+
+const FIELD_LABELS: Record<string, string> = {
+  email: 'Email address',
+  admin_email: 'Email address',
+  from_email: 'Email address',
+  support_email: 'Support email',
+  password: 'Password',
+  admin_password: 'Password',
+  full_name: 'Name',
+  admin_name: 'Your name',
+  business_name: 'Business name',
+  display_name: 'Business name',
+  tenant_slug: 'Workspace address',
+  support_phone: 'Support phone',
+  message: 'Message',
+  text: 'Message',
+  allowed_websites: 'Websites',
+  welcome_ar: 'Arabic welcome message',
+  welcome_en: 'English welcome message',
+};
+
+function fieldLabel(loc?: Array<string | number>) {
+  const names = (loc || []).filter((part): part is string => typeof part === 'string' && !['body', 'query', 'path', 'header'].includes(part));
+  const key = names[names.length - 1];
+  if (!key) return 'This field';
+  return FIELD_LABELS[key] || key.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+}
+
+// Turns the server's field-validation details into a sentence a person can act on.
+export function describeValidationIssue(issue: ValidationIssue) {
+  const label = fieldLabel(issue.loc);
+  const type = issue.type || '';
+  const limit = (key: string) => {
+    const value = issue.ctx ? issue.ctx[key] : undefined;
+    return typeof value === 'number' ? String(value) : null;
+  };
+  if (/email address/i.test(issue.msg || '')) return `${label}: enter a working email address, like name@company.com.`;
+  if (type === 'missing') return `${label} is required.`;
+  if (type === 'string_too_short') return limit('min_length') ? `${label} must be at least ${limit('min_length')} characters.` : `${label} is too short.`;
+  if (type === 'string_too_long') return limit('max_length') ? `${label} must be ${limit('max_length')} characters or fewer.` : `${label} is too long.`;
+  if (type === 'string_pattern_mismatch') return `${label} contains characters that are not allowed.`;
+  if (type.endsWith('_parsing') || type.endsWith('_type')) return `${label} has a value in the wrong format.`;
+  return `${label}: please check this value.`;
+}
+
+// Used when the server (or a proxy in front of it) answers without a readable reason,
+// for example an HTML error page. Never show that page's raw markup to the user.
+function describeHttpFailure(status: number): string {
+  if (status === 413) return 'This file is too large to upload.';
+  if (status === 429) return 'Too many attempts. Please wait a minute and try again.';
+  if (status === 502 || status === 503 || status === 504) return 'The service is temporarily unavailable. Please try again in a moment.';
+  return `Something went wrong (error ${status}). Please try again.`;
+}
 
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
@@ -178,10 +242,10 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
     const text = await res.text();
     let detail: string | null = null;
     try {
-      const parsed = JSON.parse(text) as { detail?: string | Array<{msg?: string}> };
-      detail = Array.isArray(parsed.detail) ? parsed.detail.map(e => e.msg || 'Invalid value').join('. ') : parsed.detail || null;
+      const parsed = JSON.parse(text) as { detail?: string | ValidationIssue[] };
+      detail = Array.isArray(parsed.detail) ? Array.from(new Set(parsed.detail.map(describeValidationIssue))).join(' ') : parsed.detail || null;
     } catch {}
-    throw new Error(detail || text || `Request failed with ${res.status}`);
+    throw new Error(detail || describeHttpFailure(res.status));
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -263,6 +327,8 @@ export const api = {
   channels: (token: string, tenantSlug: string) => request<Channel[]>('/channels', auth(token, tenantSlug)),
   saveChannel: (token: string, tenantSlug: string, channel: string, payload: { status: string; public_config: Record<string, unknown>; credentials?: Record<string, unknown> | null }) => request<Channel>(`/channels/${channel}/settings`, { method: 'PUT', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   testChannel: (token: string, tenantSlug: string, payload: { channel_type: string; session_id?: string | null; message: string }) => request<ChannelTestConsoleResult>('/channels/test-console/message', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
+  widgetSettings: (token: string, tenantSlug: string) => request<WidgetSettingsResult>('/channels/web_chat/widget', auth(token, tenantSlug)),
+  saveWidgetSettings: (token: string, tenantSlug: string, payload: WidgetSettings) => request<WidgetSettingsResult>('/channels/web_chat/widget', { method: 'PUT', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   trainingExamples: (token: string, tenantSlug: string) => request<TrainingExample[]>('/training-examples', auth(token, tenantSlug)),
   createTrainingExample: (token: string, tenantSlug: string, payload: { raw_text: string; labeled_intent?: string | null }) => request('/training-examples', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),
   smartImportPreviewText: (token: string, tenantSlug: string, payload: { text: string; source_type?: string }) => request<SmartImportPreview>('/imports/smart/preview-text', { method: 'POST', body: JSON.stringify(payload), ...auth(token, tenantSlug) }),

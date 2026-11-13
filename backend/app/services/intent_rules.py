@@ -40,6 +40,24 @@ ENGLISH_CHAT_ALIASES = {
     "plz": "please",
     "thx": "thanks",
 }
+# Phrases that clearly ask for a person. They hand the conversation to staff in every
+# workspace, even one that has no "human request" topic. Broader words that could
+# also be part of an ordinary question (e.g. "customer service hours") are only
+# hints for the HUMAN_REQUEST topic below.
+PERSON_REQUEST_PHRASES: dict[str, tuple[str, ...]] = {
+    "ar": (
+        "اكلم موظف", "ابغى موظف", "ابغي موظف", "ابي موظف",
+        "اكلم شخص", "اكلم احد", "اكلم انسان", "ابغى انسان", "ابغي انسان", "ابي انسان",
+        "شخص حقيقي", "انسان حقيقي", "اكلم المسؤول", "اكلم المدير", "اكلم خدمة العملاء",
+    ),
+    "en": (
+        "human", "representative", "real person",
+        "talk to a person", "speak to a person", "speak with a person", "want a person", "need a person",
+        "talk to someone", "speak to someone", "speak with someone", "talk to staff", "speak to staff",
+        "live agent", "real agent", "talk to an agent", "speak to an agent", "speak with an agent",
+        "talk to a manager", "speak to a manager", "talk to the manager", "speak to the manager",
+    ),
+}
 INTENT_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     "PRICING": {
         "ar": ("بكم", "كم السعر", "كم الاسعار", "اسعار", "سعر", "تكلفه", "تكلفة", "رسوم"),
@@ -54,8 +72,8 @@ INTENT_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "en": ("complaint", "i want to complain"),
     },
     "HUMAN_REQUEST": {
-        "ar": ("موظف", "اكلم موظف", "ابغى موظف", "ابغي موظف", "خدمة العملاء"),
-        "en": ("human", "agent", "representative", "real person", "customer service"),
+        "ar": PERSON_REQUEST_PHRASES["ar"] + ("موظف", "خدمة العملاء", "المسؤول", "المدير"),
+        "en": PERSON_REQUEST_PHRASES["en"] + ("agent", "customer service", "staff member", "employee", "operator", "manager"),
     },
     "GREETING": {
         "ar": ("السلام عليكم", "مرحبا", "اهلا", "هلا"),
@@ -143,6 +161,17 @@ def _normalize(text: str, *, loose: bool) -> str:
         value = REPEATED_CHAR_RE.sub(r"\1\1", value)
         value = SPACE_RE.sub(" ", value).strip()
     return value
+
+
+_LOOSE_PERSON_REQUEST_PHRASES = tuple(
+    loose_normalize_text(phrase) for phrases in PERSON_REQUEST_PHRASES.values() for phrase in phrases
+)
+
+
+def asks_for_a_person(text: str) -> bool:
+    """True when the message clearly asks to talk to a person (whole words, any workspace)."""
+    padded = f" {loose_normalize_text(text)} "
+    return any(f" {phrase} " in padded for phrase in _LOOSE_PERSON_REQUEST_PHRASES if phrase)
 
 
 def _contains_arabic(text: str) -> bool:

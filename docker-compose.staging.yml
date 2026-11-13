@@ -14,6 +14,10 @@ x-backend: &backend
     ALLOW_UNSIGNED_WEBHOOKS_IN_DEV: 'false'
     EMAIL_POLLING_ENABLED: 'false'
     OLLAMA_ENABLED: 'false'
+    # The backend is only reachable through the proxies on this private network.
+    # Trusting that network lets it read the real visitor address they forward,
+    # so sign-in, signup and chat limits apply per visitor instead of to everyone.
+    FORWARDED_ALLOW_IPS: ${STAGING_SUBNET:-172.28.88.0/24}
   logging: *logging
 services:
   postgres:
@@ -67,6 +71,12 @@ services:
     depends_on:
       backend: {condition: service_healthy}
     restart: unless-stopped
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${STAGING_SUBNET:-172.28.88.0/24}
 volumes:
   staging_database:
   staging_uploads:
+

@@ -283,6 +283,85 @@ def test_explicit_human_request_handoffs_immediately(db, tenant):
     assert conv.state == "HUMAN_HANDOFF"
 
 
+def test_handoff_sends_one_acknowledgement_in_customer_language_then_stays_silent(db, tenant):
+    service = ConversationOrchestrator()
+
+    arabic = service.handle_inbound(db, tenant=tenant, customer_phone="0500000020", text="ابغى موظف", channel_type="whatsapp", provider_message_id="ack-ar-1")
+    assert arabic["status"] == "handoff"
+    assert arabic["auto_reply"] == "تم تحويل طلبك إلى فريقنا، وسيرد عليك أحد الموظفين في أقرب وقت ممكن."
+    ack = db.query(Message).filter(Message.tenant_id == tenant.id, Message.id == arabic["outbound_message_id"]).one()
+    assert ack.direction == "outbound"
+    assert (ack.payload_json or {}).get("system_event") == "handoff_acknowledgement"
+
+    waiting = service.handle_inbound(db, tenant=tenant, customer_phone="0500000020", text="الو", channel_type="whatsapp", provider_message_id="ack-ar-2")
+    assert waiting["status"] == "stored"
+    assert waiting["auto_reply"] is None
+    conv = db.query(Conversation).filter(Conversation.tenant_id == tenant.id, Conversation.id == ack.conversation_id).one()
+    assert db.query(Message).filter(Message.conversation_id == conv.id, Message.direction == "outbound").count() == 1
+
+    english = service.handle_inbound(db, tenant=tenant, customer_phone="0500000021", text="I have a complaint about my order", channel_type="whatsapp", provider_message_id="ack-en-1")
+    assert english["status"] == "handoff"
+    assert english["auto_reply"] == "I've passed your request to our team. A team member will reply as soon as possible."
+
+
+def test_request_for_a_person_hands_off_even_without_a_human_request_topic(db, tenant):
+    from app.models.entities import IntentDefinition
+
+    db.query(IntentDefinition).filter(IntentDefinition.tenant_id == tenant.id, IntentDefinition.code == "HUMAN_REQUEST").update({"enabled": False})
+    db.commit()
+    service = ConversationOrchestrator()
+
+    english = service.handle_inbound(db, tenant=tenant, customer_phone="0500000030", text="I want to talk to a person", channel_type="whatsapp", provider_message_id="person-en")
+    # The bot's own advice after declining a handoff must also work.
+    suggested = service.handle_inbound(db, tenant=tenant, customer_phone="0500000031", text="I want a human agent", channel_type="whatsapp", provider_message_id="person-hint")
+    arabic = service.handle_inbound(db, tenant=tenant, customer_phone="0500000032", text="أبي أكلم أحد لو سمحت", channel_type="whatsapp", provider_message_id="person-ar")
+
+    for result in (english, suggested, arabic):
+        assert result["status"] == "handoff"
+        assert db.query(Ticket).filter(Ticket.id == result["ticket_id"]).one().ticket_type == "handoff"
+    assert arabic["auto_reply"] == "تم تحويل طلبك إلى فريقنا، وسيرد عليك أحد الموظفين في أقرب وقت ممكن."
+
+
+def test_ordinary_questions_are_not_mistaken_for_a_request_for_a_person():
+    from app.services.intent_rules import asks_for_a_person
+
+    assert asks_for_a_person("What are your customer service hours?") is False
+    assert asks_for_a_person("Is the clinic open on Friday?") is False
+    assert asks_for_a_person("هل عندكم موظفة؟") is False
+    assert asks_for_a_person("I'd like to speak to someone about my bill") is True
+
+
+def test_topic_with_custom_answer_is_answered_by_the_agent(db, tenant):
+    from types import SimpleNamespace
+
+    from app.api.routes_config import IntentCreate, create_intent
+    from app.models.entities import IntentKeyword
+
+    create_intent(
+        payload=IntentCreate(
+            code="APPOINTMENT",
+            label="Book an appointment",
+            supported_languages="both",
+            response_mode="custom",
+            custom_response_ar="تقدر تحجز موعدك من الرابط.",
+            custom_response_en="You can book through the link.",
+        ),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=77)},
+    )
+    db.add(IntentKeyword(tenant_id=tenant.id, intent_code="APPOINTMENT", phrase="appointment", weight=3, lang="en"))
+    db.commit()
+
+    decision = ConversationOrchestrator().handle_inbound(db, tenant=tenant, customer_phone="0500000022", text="I need an appointment", channel_type="whatsapp", provider_message_id="custom-answer-1")
+
+    assert decision["status"] == "answered"
+    assert decision["auto_reply"] == "You can book through the link."
+    conv = db.query(Conversation).filter(Conversation.tenant_id == tenant.id).order_by(Conversation.id.desc()).first()
+    assert conv.state == "BOT_ACTIVE"
+    assert db.query(Ticket).filter(Ticket.tenant_id == tenant.id, Ticket.conversation_id == conv.id).count() == 0
+
+
 def test_pricing_can_offer_handoff_and_confirm_yes(db, tenant):
     routing_rule = db.query(RoutingRule).filter_by(tenant_id=tenant.id, intent_code="PRICING").first()
     routing_rule.primary_owner_role = "OPERATIONS_STAFF"
@@ -520,6 +599,33 @@ def test_human_handoff_auto_returns_to_bot_after_one_minute(db, tenant, monkeypa
     db.refresh(conv)
     assert conv.state == "BOT_ACTIVE"
     assert conv.last_intent == "PRICING"
+
+
+def test_staff_reply_keeps_the_bot_quiet_while_the_team_is_talking(db, tenant, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api.routes_operations import ConversationReplyRequest, reply_to_conversation
+
+    service = ConversationOrchestrator()
+    service.handle_inbound(db, tenant=tenant, customer_phone="0500000040", text="ابغى موظف", channel_type="whatsapp", provider_message_id="hold-1")
+    conv = db.query(Conversation).filter(Conversation.tenant_id == tenant.id).order_by(Conversation.id.desc()).first()
+
+    # Nobody answered within a minute, so the bot picked the conversation back up.
+    monkeypatch.setattr(service, "_now", lambda: datetime.now(timezone.utc) + timedelta(minutes=2))
+    assert service.handle_inbound(db, tenant=tenant, customer_phone="0500000040", text="كم السعر؟", channel_type="whatsapp", provider_message_id="hold-2")["status"] == "answered"
+
+    # A team member replies: the conversation is theirs, and the customer's answer reaches them.
+    reply_to_conversation(conv.id, ConversationReplyRequest(text="أهلاً، معك سارة من الفريق"), tenant=tenant, db=db, ctx={"user": SimpleNamespace(id=77)})
+    db.refresh(conv)
+    assert conv.state == "HUMAN_HANDOFF"
+    monkeypatch.setattr(service, "_now", lambda: datetime.now(timezone.utc) + timedelta(minutes=5))
+    quiet = service.handle_inbound(db, tenant=tenant, customer_phone="0500000040", text="كم السعر؟", channel_type="whatsapp", provider_message_id="hold-3")
+    assert quiet["status"] == "stored"
+    assert quiet["auto_reply"] is None
+
+    # After 15 minutes without a team reply the bot helps again.
+    monkeypatch.setattr(service, "_now", lambda: datetime.now(timezone.utc) + timedelta(minutes=16))
+    assert service.handle_inbound(db, tenant=tenant, customer_phone="0500000040", text="كم السعر؟", channel_type="whatsapp", provider_message_id="hold-4")["status"] == "answered"
 
 
 def test_complaint_handoff_auto_returns_to_bot_but_keeps_complaint_marker(db, tenant, monkeypatch):

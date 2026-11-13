@@ -9,9 +9,11 @@ from app.api.routes_config import (
     IntentUpdate,
     RoutingRuleUpsert,
     StaffCreate,
+    StaffRoleUpdate,
     TenantProfileUpdate,
     archive_faq,
     create_staff,
+    replace_staff_roles,
     create_faq,
     create_intent,
     delete_faq_permanently,
@@ -30,19 +32,16 @@ from app.api.routes_config import (
 from app.api.routes_auth import login
 from app.core.security import verify_password
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, ROLE_OPERATIONS_STAFF, require_tenant_roles
-from app.models.entities import AuditLog, FaqItem, IntentDefinition, IntentKeyword, RoutingRule, TenantUserRole, TrainingExample, User
+from app.models.entities import AuditLog, FaqItem, IntentDefinition, IntentKeyword, RoutingRule, Tenant, TenantUserRole, TrainingExample, User
 from app.schemas.auth import LoginRequest
 from app.services.response_engine import ResponseEngine
+from fastapi import HTTPException
 from pydantic import ValidationError
 import pytest
 
 
 class FakeRequest:
     client = SimpleNamespace(host="127.0.0.1")
-
-
-class FakeLogoRequest:
-    base_url = "http://testserver/"
 
 
 class FakeUploadFile:
@@ -58,7 +57,6 @@ class FakeUploadFile:
 def run_logo_upload(db, tenant, filename: str, content_type: str, content: bytes):
     return asyncio.run(
         upload_profile_logo(
-            request=FakeLogoRequest(),
             file=FakeUploadFile(filename, content_type, content),
             tenant=tenant,
             db=db,
@@ -385,6 +383,168 @@ def test_created_staff_can_login_with_explicit_password(db, tenant):
     assert response.user["email"] == "staff-login@example.com"
 
 
+def make_other_workspace_admin(db):
+    other = Tenant(slug="other-workspace", display_name="Other Workspace", timezone="Asia/Riyadh", default_lang="ar", status="active")
+    owner = User(email="owner@other-workspace.example.com", full_name="Original Owner", password_hash="hash")
+    db.add_all([other, owner])
+    db.flush()
+    db.add(TenantUserRole(tenant_id=other.id, user_id=owner.id, role_code=ROLE_BUSINESS_ADMIN))
+    db.commit()
+    return other, owner
+
+
+def test_staff_create_refuses_account_that_belongs_to_another_workspace(db, tenant):
+    other, owner = make_other_workspace_admin(db)
+
+    with pytest.raises(HTTPException) as exc:
+        create_staff(
+            payload=StaffCreate(email=owner.email, full_name="Renamed By Stranger", password="Irrelevant123!", roles=[ROLE_OPERATIONS_STAFF]),
+            tenant=tenant,
+            db=db,
+            ctx={"user": SimpleNamespace(id=60)},
+        )
+
+    db.rollback()
+    db.refresh(owner)
+    assert exc.value.status_code == 409
+    assert owner.full_name == "Original Owner"
+    assert db.query(TenantUserRole).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.user_id == owner.id).count() == 0
+    assert db.query(TenantUserRole).filter(TenantUserRole.tenant_id == other.id, TenantUserRole.user_id == owner.id).count() == 1
+
+
+def test_staff_create_refuses_platform_admin_account(db, tenant):
+    platform_admin = User(email="platform@example.com", full_name="Platform Admin", password_hash="hash", is_platform_admin=True)
+    db.add(platform_admin)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        create_staff(
+            payload=StaffCreate(email="platform@example.com", full_name="Taken Over", password="Irrelevant123!", roles=[ROLE_BUSINESS_ADMIN]),
+            tenant=tenant,
+            db=db,
+            ctx={"user": SimpleNamespace(id=61)},
+        )
+
+    assert exc.value.status_code == 409
+    assert db.query(TenantUserRole).filter(TenantUserRole.user_id == platform_admin.id).count() == 0
+
+
+def test_staff_create_still_updates_roles_and_name_of_own_member(db, tenant):
+    create_staff(
+        payload=StaffCreate(email="member@example.com", full_name="First Name", password="MemberPass123!", roles=[ROLE_OPERATIONS_STAFF]),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=62)},
+    )
+    create_staff(
+        payload=StaffCreate(email="member@example.com", full_name="Updated Name", password="Ignored123!", roles=[ROLE_OPERATIONS_STAFF, ROLE_BUSINESS_ADMIN]),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=62)},
+    )
+
+    member = db.query(User).filter(User.email == "member@example.com").one()
+    roles = {row.role_code for row in db.query(TenantUserRole).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.user_id == member.id).all()}
+    assert member.full_name == "Updated Name"
+    assert verify_password("MemberPass123!", member.password_hash)
+    assert roles == {ROLE_OPERATIONS_STAFF, ROLE_BUSINESS_ADMIN}
+
+
+def test_staff_roles_update_refuses_users_outside_the_workspace(db, tenant):
+    other, owner = make_other_workspace_admin(db)
+
+    with pytest.raises(HTTPException) as exc:
+        replace_staff_roles(
+            user_id=owner.id,
+            payload=StaffRoleUpdate(roles=[ROLE_OPERATIONS_STAFF]),
+            tenant=tenant,
+            db=db,
+            ctx={"user": SimpleNamespace(id=63)},
+        )
+
+    assert exc.value.status_code == 404
+    assert db.query(TenantUserRole).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.user_id == owner.id).count() == 0
+
+
+def test_staff_roles_update_refuses_unknown_roles(db, tenant):
+    create_staff(
+        payload=StaffCreate(email="roles@example.com", full_name="Roles Member", password="RolesPass123!", roles=[ROLE_OPERATIONS_STAFF]),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=64)},
+    )
+    member = db.query(User).filter(User.email == "roles@example.com").one()
+
+    with pytest.raises(HTTPException) as exc:
+        replace_staff_roles(
+            user_id=member.id,
+            payload=StaffRoleUpdate(roles=["MADE_UP_ROLE"]),
+            tenant=tenant,
+            db=db,
+            ctx={"user": SimpleNamespace(id=64)},
+        )
+
+    assert exc.value.status_code == 400
+    roles = [row.role_code for row in db.query(TenantUserRole).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.user_id == member.id).all()]
+    assert roles == [ROLE_OPERATIONS_STAFF]
+
+    replace_staff_roles(
+        user_id=member.id,
+        payload=StaffRoleUpdate(roles=[ROLE_BUSINESS_ADMIN]),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=64)},
+    )
+    roles = [row.role_code for row in db.query(TenantUserRole).filter(TenantUserRole.tenant_id == tenant.id, TenantUserRole.user_id == member.id).all()]
+    assert roles == [ROLE_BUSINESS_ADMIN]
+
+
+def test_custom_answer_topic_defaults_to_agent_reply_but_protected_topics_still_hand_off(db, tenant):
+    create_intent(
+        payload=IntentCreate(code="OPENING_OFFER", label="Opening offer", response_mode="custom", custom_response_en="We have an opening offer this month."),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=65)},
+    )
+    create_intent(
+        payload=IntentCreate(code="PAYMENT_TRANSFER", label="Payment transfer", response_mode="custom", custom_response_en="Please send the transfer receipt."),
+        tenant=tenant,
+        db=db,
+        ctx={"user": SimpleNamespace(id=65)},
+    )
+
+    offer = db.query(RoutingRule).filter(RoutingRule.tenant_id == tenant.id, RoutingRule.intent_code == "OPENING_OFFER").one()
+    payment = db.query(RoutingRule).filter(RoutingRule.tenant_id == tenant.id, RoutingRule.intent_code == "PAYMENT_TRANSFER").one()
+    assert offer.primary_owner_role == "BOT"
+    assert offer.handoff_required is False
+    assert offer.ticket_type is None
+    assert payment.handoff_required is True
+    assert payment.ticket_type == "payment"
+
+
+def test_saving_custom_answer_corrects_untouched_default_handoff_only(db, tenant):
+    untouched = IntentDefinition(tenant_id=tenant.id, code="REFUNDS", label="Refunds", enabled=True, response_mode="custom", custom_response_en="Refunds take five days.")
+    chosen = IntentDefinition(tenant_id=tenant.id, code="WARRANTY", label="Warranty", enabled=True, response_mode="custom", custom_response_en="Warranty lasts one year.")
+    db.add_all([untouched, chosen])
+    db.flush()
+    db.add_all([
+        RoutingRule(tenant_id=tenant.id, intent_code="REFUNDS", primary_owner_role=ROLE_OPERATIONS_STAFF, handoff_required=True, ticket_type="handoff", priority="normal", escalation_json={"reason": "custom_intent_without_default_response"}),
+        RoutingRule(tenant_id=tenant.id, intent_code="WARRANTY", primary_owner_role=ROLE_OPERATIONS_STAFF, handoff_required=True, ticket_type="handoff", priority="normal", escalation_json={"reason": "custom_intent_without_default_response", "response_behavior": "immediate_handoff"}),
+    ])
+    db.commit()
+
+    for row in (untouched, chosen):
+        update_intent(intent_id=row.id, payload=IntentUpdate(label=row.label), tenant=tenant, db=db, ctx={"user": SimpleNamespace(id=66)})
+
+    refunds = db.query(RoutingRule).filter(RoutingRule.tenant_id == tenant.id, RoutingRule.intent_code == "REFUNDS").one()
+    warranty = db.query(RoutingRule).filter(RoutingRule.tenant_id == tenant.id, RoutingRule.intent_code == "WARRANTY").one()
+    assert refunds.primary_owner_role == "BOT"
+    assert refunds.handoff_required is False
+    assert warranty.primary_owner_role == ROLE_OPERATIONS_STAFF
+    assert warranty.handoff_required is True
+    assert db.query(AuditLog).filter(AuditLog.tenant_id == tenant.id, AuditLog.action == "routing_rule.auto_corrected", AuditLog.entity_id == "REFUNDS").count() == 1
+
+
 def test_non_admin_role_dependency_blocks_staff_creation(db, tenant):
     user = User(email="ops-only@example.com", full_name="Ops Only", password_hash="hash")
     db.add(user)
@@ -440,7 +600,7 @@ def test_logo_upload_accepts_png_jpeg_and_webp(db, tenant, tmp_path, monkeypatch
     for filename, content_type, content, extension in uploads:
         response = run_logo_upload(db, tenant, filename, content_type, content)
         assert response["status"] == "uploaded"
-        assert response["logo_url"].startswith("http://testserver/uploads/tenant_logos/test-tenant/")
+        assert response["logo_url"].startswith("/uploads/tenant_logos/test-tenant/")
         assert response["logo_url"].endswith(extension)
 
 

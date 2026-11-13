@@ -174,9 +174,50 @@ def test_channel_test_console_handoff_state_is_returned(db, tenant):
         _={},
     )
 
-    assert result.reply is None
+    assert result.reply == "I've passed your request to our team. A team member will reply as soon as possible."
     assert result.handoff is True
     assert result.state == "HUMAN_HANDOFF"
+
+
+def test_channel_test_console_hands_off_a_request_for_a_person_without_a_human_topic(db, tenant):
+    from app.models.entities import IntentDefinition
+
+    enable_channel(db, tenant, "web_chat")
+    db.query(IntentDefinition).filter(IntentDefinition.tenant_id == tenant.id, IntentDefinition.code == "HUMAN_REQUEST").update({"enabled": False})
+    db.commit()
+
+    result = routes_channels.test_console_message(
+        ChannelTestConsoleRequest(channel_type="web_chat", session_id="person", message="Can I talk to a person please?"),
+        db=db,
+        tenant=tenant,
+        _={},
+    )
+
+    assert result.intent == "HUMAN_REQUEST"
+    assert result.handoff is True
+    assert result.state == "HUMAN_HANDOFF"
+
+
+def test_channel_test_console_clarifies_in_the_customer_language(db, tenant):
+    enable_channel(db, tenant, "web_chat")
+
+    english = routes_channels.test_console_message(
+        ChannelTestConsoleRequest(channel_type="web_chat", session_id="clarify-en", message="do you accept medical insurance today"),
+        db=db,
+        tenant=tenant,
+        _={},
+    )
+    no_language = routes_channels.test_console_message(
+        ChannelTestConsoleRequest(channel_type="web_chat", session_id="clarify-default", message="777 ؟؟"),
+        db=db,
+        tenant=tenant,
+        _={},
+    )
+
+    assert english.state == "CLARIFYING"
+    assert english.reply == "Could you clarify your request?"
+    assert no_language.state == "CLARIFYING"
+    assert no_language.reply == "ممكن توضح طلبك أكثر؟"
 
 
 def test_legacy_test_console_conversations_are_hidden_from_dashboard(db, tenant):

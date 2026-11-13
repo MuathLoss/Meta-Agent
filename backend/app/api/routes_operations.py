@@ -18,11 +18,13 @@ from app.core.tenancy import (
 )
 from app.models.entities import AuditLog, Conversation, Customer, Message, Tenant, Ticket
 from app.services.customer_channel_identity_service import CustomerChannelIdentityService
+from app.services.orchestrator import ConversationOrchestrator
 from app.services.outbound_service import OutboundService
 
 router = APIRouter(tags=["operations"])
 ROLES = (ROLE_BUSINESS_ADMIN, ROLE_OPERATIONS_STAFF, ROLE_FINANCE, ROLE_CERTIFICATES, ROLE_SUPERVISOR)
 outbound_service = OutboundService()
+conversation_orchestrator = ConversationOrchestrator()
 customer_identity = CustomerChannelIdentityService()
 
 
@@ -121,6 +123,8 @@ def reply_to_conversation(conversation_id: int, payload: ConversationReplyReques
         text=text,
         intent_code="MANUAL_REPLY",
     )
+    # While the team is talking, the customer's answers go to the team, not the bot.
+    taken_over = conversation_orchestrator.hold_for_team(conv)
     conv.updated_at = datetime.now(timezone.utc)
     audit(
         db,
@@ -133,6 +137,7 @@ def reply_to_conversation(conversation_id: int, payload: ConversationReplyReques
             "channel_type": conv.channel_type,
             "message_id": message.id,
             "send_status": (message.payload_json or {}).get("send_status"),
+            "taken_over_from_bot": taken_over,
         },
     )
     db.commit()

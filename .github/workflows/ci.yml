@@ -34,7 +34,8 @@ jobs:
         working-directory: backend
     env:
       APP_ENV: development
-      DATABASE_URL: sqlite+pysqlite:///:memory:
+      # Quoted: a value ending in ':' is otherwise read as a YAML key.
+      DATABASE_URL: 'sqlite+pysqlite:///:memory:'
       REDIS_TEST_URL: redis://localhost:6379/15
       POSTGRES_TEST_URL: postgresql+psycopg://test:test@localhost:5432/migrations_test
     steps:

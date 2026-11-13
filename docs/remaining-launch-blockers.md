@@ -6,7 +6,7 @@ Live list (spec v1.2, Sections 17–18). Update it whenever something changes. L
 
 | Blocker | Blocks | Status |
 |---|---|---|
-| Written rights to sell software built on the handed-over Agent SW code | Any sale | Open |
+| Ownership of the handed-over Agent SW code | Any sale | Settled: the owner confirmed on 2026-11-13 that the original author transferred it to him in full. Keep a short written note of that transfer on file |
 | Meta billing arrangement for included WhatsApp usage, or verified free-tier sizing (spec 3.1 a–b) | Live WhatsApp | Open |
 | Whether a WhatsApp Business account needs a payment method on file for free-tier messages | Live WhatsApp | Open |
 | Meta app, business verification, WABA assets | Live WhatsApp | Open |
@@ -15,7 +15,8 @@ Live list (spec v1.2, Sections 17–18). Update it whenever something changes. L
 | Domain, DNS, email sender, VPS purchase | Internet pilot | Open (see `docs/vps-sizing.md`) |
 | Server country and data-location wording; privacy policy, terms, data-processing terms | Real institution data | Open |
 | Live staff replies vs ticket-only (spec P08) | Product behavior | Open; default ticket-only |
-| Commit the outstanding Agent SW work (original author's work separately) | Clean history | Waiting for owner approval |
+| Commit the outstanding Agent SW work | Clean history | Done 2026-11-13 on branch `institution-chatbot`, all under the owner's name |
+| Repository visibility and licence (GitHub `MuathLoss/Meta-Agent` is public with an MIT licence) | Selling the product | Open: owner decision |
 
 ## Engineering (by phase)
 

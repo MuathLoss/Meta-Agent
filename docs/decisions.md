@@ -14,6 +14,7 @@ Implementation decisions made while following spec v1.2. Product decisions live 
 | D8 | 2026-11-13 | Switched-off channels and broadcasts answer 404; production refuses `BROADCASTS_ENABLED`/`OLLAMA_ENABLED`; code kept | Spec v1.2, Section 2.1 and acceptance criterion 16 |
 | D9 | 2026-11-13 | Readiness fails on database always, on Redis only in staging/production; worker status is reported, not required | A stopped worker must not take the API down; local development may run without Redis |
 | D10 | 2026-11-13 | Caddy sends `/api/*` straight to the backend instead of through the frontend's nginx | One proxy hop, so forwarded client address and HTTPS scheme reach the API correctly |
+| D12 | 2026-11-13 | All history is recorded under the owner's name; the pre-handoff history with the original author's name stays on the local `master` branch only | The owner confirmed the original author transferred the code to him in full |
 | D11 | 2026-11-13 | Seed and test data: use synthetic `School A`/`School B`, not `seed_academy` | `seed_academy` holds a real-looking institution name and phone number (spec Section 2.1) |
 
 ## Must handle in Phase 1

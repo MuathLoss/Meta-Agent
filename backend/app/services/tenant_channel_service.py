@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from app.core.db import system_scope
 from app.core.redaction import REDACTED, redact_string
 from app.core.crypto import decrypt_dict, encrypt_dict
 from app.models.entities import ChannelConfig
@@ -143,15 +144,18 @@ class TenantChannelService:
                     merged_public["provider_channel_id"] = phone_id
         provider_channel_id, provider_account_id = self.routing_keys(channel_type, routing_config)
         if provider_channel_id:
-            duplicate = (
-                db.query(ChannelConfig)
-                .filter(
-                    ChannelConfig.channel_type == channel_type,
-                    ChannelConfig.provider_channel_id == str(provider_channel_id),
-                    ChannelConfig.tenant_id != tenant_id,
+            # Another tenant's number must be visible to report a clear duplicate error, so this
+            # one lookup runs outside the tenant's row-level security scope. Only the id is used.
+            with system_scope(db):
+                duplicate = (
+                    db.query(ChannelConfig.id)
+                    .filter(
+                        ChannelConfig.channel_type == channel_type,
+                        ChannelConfig.provider_channel_id == str(provider_channel_id),
+                        ChannelConfig.tenant_id != tenant_id,
+                    )
+                    .first()
                 )
-                .first()
-            )
             if duplicate:
                 raise DuplicateProviderChannelError("provider_channel_id is already configured for this channel_type")
         row.status = status

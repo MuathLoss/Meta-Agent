@@ -1,3 +1,4 @@
+from fastapi import Response
 import asyncio
 import hashlib
 import hmac
@@ -70,11 +71,11 @@ def test_login_allows_normal_request_under_limit(db, tenant):
 
     result = routes_auth.login(
         LoginRequest(email="rate@example.com", password="Secret123!", tenant_slug=tenant.slug),
-        request=FakeRequest(host="10.0.0.1"),
+        request=FakeRequest(host="10.0.0.1"), response=Response(),
         db=db,
     )
 
-    assert result.access_token
+    assert result.csrf_token
     assert result.user["email"] == "rate@example.com"
 
 
@@ -84,11 +85,11 @@ def test_login_returns_429_after_repeated_attempts(db, monkeypatch):
     payload = LoginRequest(email="missing@example.com", password="wrong", tenant_slug=None)
     for _ in range(2):
         with pytest.raises(HTTPException) as exc:
-            routes_auth.login(payload, request=FakeRequest(host="10.0.0.2"), db=db)
+            routes_auth.login(payload, request=FakeRequest(host="10.0.0.2"), response=Response(), db=db)
         assert exc.value.status_code == 401
 
     with pytest.raises(HTTPException) as exc:
-        routes_auth.login(payload, request=FakeRequest(host="10.0.0.2"), db=db)
+        routes_auth.login(payload, request=FakeRequest(host="10.0.0.2"), response=Response(), db=db)
 
     assert exc.value.status_code == 429
     assert exc.value.detail == RATE_LIMIT_DETAIL
@@ -101,9 +102,9 @@ def test_login_rate_limit_does_not_leak_whether_email_exists(db, tenant, monkeyp
     for email in ["known@example.com", "unknown@example.com"]:
         payload = LoginRequest(email=email, password="wrong", tenant_slug=tenant.slug)
         with pytest.raises(HTTPException) as first:
-            routes_auth.login(payload, request=FakeRequest(host="10.0.0.3"), db=db)
+            routes_auth.login(payload, request=FakeRequest(host="10.0.0.3"), response=Response(), db=db)
         with pytest.raises(HTTPException) as limited:
-            routes_auth.login(payload, request=FakeRequest(host="10.0.0.3"), db=db)
+            routes_auth.login(payload, request=FakeRequest(host="10.0.0.3"), response=Response(), db=db)
 
         assert first.value.status_code == 401
         assert first.value.detail == "Invalid email or password"
@@ -129,9 +130,9 @@ def test_signup_business_returns_429_after_repeated_attempts(db, monkeypatch):
         admin_password="Secret123!",
     )
 
-    assert routes_auth.signup(first, request=FakeRequest(host="10.0.0.4"), db=db).access_token
+    assert routes_auth.signup(first, request=FakeRequest(host="10.0.0.4"), response=Response(), db=db).csrf_token
     with pytest.raises(HTTPException) as exc:
-        routes_auth.signup(second, request=FakeRequest(host="10.0.0.4"), db=db)
+        routes_auth.signup(second, request=FakeRequest(host="10.0.0.4"), response=Response(), db=db)
 
     assert exc.value.status_code == 429
     assert exc.value.detail == RATE_LIMIT_DETAIL

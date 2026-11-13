@@ -1,12 +1,12 @@
 from types import SimpleNamespace
 
-from fastapi import HTTPException
-from fastapi.security import HTTPAuthorizationCredentials
+from fastapi import HTTPException, Response
 
 from app.api.routes_auth import delete_account, login, me, resolve_login_tenant_slug
 from app.core.security import get_token_payload, hash_password
+from app.core.sessions import SESSION_COOKIE
 from app.core.tenancy import get_current_user
-from app.models.entities import Branch, FaqItem, Tenant, TenantBrand, TenantUserRole, User
+from app.models.entities import Branch, FaqItem, Tenant, TenantBrand, TenantUserRole, User, UserSession
 from app.schemas.auth import DeleteAccountRequest, LoginRequest
 
 
@@ -44,50 +44,59 @@ def test_resolve_login_tenant_slug_rejects_unknown_slug():
         raise AssertionError("Expected HTTPException for unknown tenant slug")
 
 
-def test_login_response_has_access_token_and_no_refresh_token(db, tenant):
+def test_login_sets_an_httponly_session_cookie_and_returns_no_token(db, tenant):
     user = User(email="login-token@example.com", full_name="Login Token", password_hash=hash_password("Secret123!"))
     db.add(user)
     db.flush()
     db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code="BUSINESS_ADMIN"))
     db.commit()
 
-    response = login(
+    http_response = Response()
+    result = login(
         LoginRequest(email="login-token@example.com", password="Secret123!", tenant_slug=tenant.slug),
         request=FakeRequest(),
+        response=http_response,
         db=db,
     )
-    data = response.model_dump()
+    data = result.model_dump()
+    cookie = http_response.headers["set-cookie"]
 
-    assert data["access_token"]
-    assert data["token_type"] == "bearer"
-    assert "refresh_token" not in data
+    assert "access_token" not in data and "refresh_token" not in data
+    assert data["csrf_token"] and data["tenant_slug"] == tenant.slug
+    assert cookie.startswith(f"{SESSION_COOKIE}=")
+    assert "httponly" in cookie.lower() and "samesite=lax" in cookie.lower()
+    assert db.query(UserSession).filter(UserSession.user_id == user.id).count() == 1
 
 
-def test_auth_me_works_with_returned_access_token(db, tenant):
+def test_auth_me_works_with_the_session_cookie(db, tenant):
     user = User(email="me-token@example.com", full_name="Me Token", password_hash=hash_password("Secret123!"))
     db.add(user)
     db.flush()
     db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code="BUSINESS_ADMIN"))
     db.commit()
 
-    response = login(
+    http_response = Response()
+    login(
         LoginRequest(email="me-token@example.com", password="Secret123!", tenant_slug=tenant.slug),
         request=FakeRequest(),
+        response=http_response,
         db=db,
     )
-    payload = get_token_payload(HTTPAuthorizationCredentials(scheme="Bearer", credentials=response.access_token))
+    raw = http_response.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
+    payload = get_token_payload(SimpleNamespace(cookies={SESSION_COOKIE: raw}, method="GET", headers={}), db=db)
     resolved_user = get_current_user(payload=payload, db=db)
-    result = me(user=resolved_user, db=db)
+    result = me(user=resolved_user, payload=payload, db=db)
 
     assert result["email"] == "me-token@example.com"
     assert result["memberships"][0]["tenant_slug"] == tenant.slug
+    assert result["csrf_token"]
 
 
 def test_delete_account_removes_tenant_and_related_data(db, tenant):
     user = User(email="owner@example.com", full_name="Owner", password_hash=hash_password("DeleteMe123!"))
     db.add(user)
     db.flush()
-    db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code="BUSINESS_ADMIN"))
+    db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code="OWNER"))
     db.add(TenantBrand(tenant_id=tenant.id, primary_color="#111111", support_phone="0500000000"))
     db.add(Branch(tenant_id=tenant.id, name="Temp Branch"))
     db.add(FaqItem(tenant_id=tenant.id, topic_key="temp", arabic_answer="temp", status="active"))
@@ -98,7 +107,7 @@ def test_delete_account_removes_tenant_and_related_data(db, tenant):
         user=user,
         tenant=tenant,
         db=db,
-        ctx={"user": user, "tenant": tenant, "roles": ["BUSINESS_ADMIN"]},
+        ctx={"user": user, "tenant": tenant, "roles": ["OWNER", "BUSINESS_ADMIN"]},
     )
 
     assert result["status"] == "deleted"
@@ -126,7 +135,7 @@ def test_delete_account_keeps_user_if_other_memberships_exist(db, tenant):
         user=user,
         tenant=tenant,
         db=db,
-        ctx={"user": user, "tenant": tenant, "roles": ["BUSINESS_ADMIN"]},
+        ctx={"user": user, "tenant": tenant, "roles": ["OWNER", "BUSINESS_ADMIN"]},
     )
 
     assert result["status"] == "deleted"
@@ -149,10 +158,32 @@ def test_delete_account_rejects_incorrect_password(db, tenant):
             user=user,
             tenant=tenant,
             db=db,
-            ctx={"user": user, "tenant": tenant, "roles": ["BUSINESS_ADMIN"]},
+            ctx={"user": user, "tenant": tenant, "roles": ["OWNER", "BUSINESS_ADMIN"]},
         )
     except HTTPException as exc:
         assert exc.status_code == 401
         assert exc.detail == "Incorrect password"
     else:
         raise AssertionError("Expected HTTPException for incorrect password")
+
+
+def test_delete_account_needs_the_owner_role(db, tenant):
+    user = User(email="admin-only@example.com", full_name="Admin Only", password_hash=hash_password("DeleteMe123!"))
+    db.add(user)
+    db.flush()
+    db.add(TenantUserRole(tenant_id=tenant.id, user_id=user.id, role_code="BUSINESS_ADMIN"))
+    db.commit()
+
+    try:
+        delete_account(
+            payload=DeleteAccountRequest(password="DeleteMe123!"),
+            user=user,
+            tenant=tenant,
+            db=db,
+            ctx={"user": user, "tenant": tenant, "roles": ["BUSINESS_ADMIN"]},
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("An admin who is not the owner must not delete the workspace")
+    assert db.query(Tenant).filter(Tenant.id == tenant.id).count() == 1

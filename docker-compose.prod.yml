@@ -15,7 +15,10 @@ x-backend: &backend
   env_file: .env.production
   environment: &environment
     APP_ENV: production
-    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}@postgres:5432/${POSTGRES_DB:-agent}
+    # Limited login that row-level security applies to; only migrate uses the owner (POSTGRES_USER).
+    DATABASE_URL: postgresql+psycopg://${APP_DB_USER:-agent_app}:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env.production}@postgres:5432/${POSTGRES_DB:-agent}
+    SESSION_COOKIE_SECURE: 'true'
+    ACCOUNT_EMAIL_PROVIDER: smtp
     REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
     STORAGE_BACKEND: local
     STORAGE_LOCAL_ROOT: /app/storage
@@ -108,7 +111,13 @@ services:
 
   migrate:
     <<: *backend
-    command: [python, -m, alembic, upgrade, head]
+    environment:
+      <<: *environment
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}@postgres:5432/${POSTGRES_DB:-agent}
+      APP_DB_USER: ${APP_DB_USER:-agent_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+    # Migrations as the owner, then create/update the limited login the API and worker use.
+    command: [sh, -c, 'python -m alembic upgrade head && python scripts/setup_db_roles.py']
     networks: [data]
     depends_on:
       postgres: {condition: service_healthy}

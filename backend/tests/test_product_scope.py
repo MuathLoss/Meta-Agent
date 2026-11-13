@@ -23,6 +23,9 @@ def make_settings(**overrides) -> Settings:
         "database_url": "postgresql+psycopg://user:pass@db.internal/app",
         "tenant_channel_secret_key": "real-tenant-channel-secret",
         "cors_allowed_origins": "https://app.example.test",
+        "account_email_provider": "smtp",
+        "smtp_host": "smtp.example.test",
+        "smtp_from": "no-reply@example.test",
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)

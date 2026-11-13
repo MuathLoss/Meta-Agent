@@ -1,9 +1,14 @@
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
-from app.core.db import get_db
+from app.core.db import bind_tenant, get_db
 from app.core.security import get_token_payload
 from app.models.entities import AuditLog, Tenant, TenantUserRole, User
 
+# Spec v1.2 roles mapped onto Agent SW's role codes (docs/decisions.md):
+#   owner = OWNER (subscription, account deletion; always also BUSINESS_ADMIN)
+#   admin = BUSINESS_ADMIN
+#   staff = OPERATIONS_STAFF, SUPERVISOR, FINANCE, CERTIFICATES
+ROLE_OWNER = "OWNER"
 ROLE_BUSINESS_ADMIN = "BUSINESS_ADMIN"
 ROLE_OPERATIONS_STAFF = "OPERATIONS_STAFF"
 ROLE_FINANCE = "FINANCE"
@@ -30,7 +35,13 @@ def get_current_tenant(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     user = db.get(User, int(payload["sub"]))
-    if user and user.is_platform_admin:
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive or missing user")
+    # Spec v1.2, Section 8: every request is checked against the user's own memberships.
+    # Same answer as an unknown workspace, so guessing slugs reveals nothing.
+    if not user.is_platform_admin and not user_roles_for_tenant(db, user.id, tenant.id):
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if user.is_platform_admin:
         reason = (x_support_access_reason or "").strip()
         if not reason:
             raise HTTPException(status_code=403, detail="Support access reason is required")
@@ -43,6 +54,8 @@ def get_current_tenant(
             details_json={"tenant_slug": tenant.slug, "reason": reason},
         ))
         db.commit()
+    # From here on PostgreSQL row-level security limits this request to the tenant's rows.
+    bind_tenant(db, tenant.id)
     return tenant
 
 def user_roles_for_tenant(db: Session, user_id: int, tenant_id: int) -> list[str]:

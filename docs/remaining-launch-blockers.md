@@ -24,8 +24,10 @@ Live list (spec v1.2, Sections 17–18). Update it whenever something changes. L
 |---|---|---|
 | pgvector, Redis + worker, private storage, production compose, CI | 0 | Done 2026-11-13 |
 | Off-server encrypted backups + tested restore of database **and** storage | 0/7 | Open; staging-only backup exists |
-| HTTP-only cookie sessions + CSRF, Argon2id, email verification | 1 | Open |
-| PostgreSQL RLS with a non-owner app role (see `docs/decisions.md`) | 1 | Open |
+| HTTP-only cookie sessions + CSRF, Argon2id, email verification, password reset, invitations | 1 | Done 2026-11-13 |
+| PostgreSQL RLS with a non-owner app role | 1 | Done 2026-11-13 |
+| SMTP provider for account emails (production refuses to start without it) | 1/7 | Open: owner choice of email service |
+| Multi-factor sign-in (TOTP) | Later | Open (spec: later version) |
 | Gemini model access check; 768 vs 1536 evaluation | 2 | Open |
 | Document ingestion, RAG answers, evaluation set (Arabic/English) | 2 | Open |
 | Widget publishing gates, domain allowlist, signed sessions | 3 | Open |

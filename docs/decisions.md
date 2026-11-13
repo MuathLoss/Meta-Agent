@@ -17,11 +17,16 @@ Implementation decisions made while following spec v1.2. Product decisions live 
 | D12 | 2026-11-13 | All history is recorded under the owner's name; the pre-handoff history with the original author's name stays on the local `master` branch only | The owner confirmed the original author transferred the code to him in full |
 | D11 | 2026-11-13 | Seed and test data: use synthetic `School A`/`School B`, not `seed_academy` | `seed_academy` holds a real-looking institution name and phone number (spec Section 2.1) |
 
-## Must handle in Phase 1
+| D13 | 2026-11-13 | Server-side sessions in an HttpOnly cookie, not JWT bearer tokens | Spec Sections 10/13: no tokens in browser storage, and sign-out / password reset must end sessions at once, which a stateless token cannot |
+| D14 | 2026-11-13 | CSRF token = HMAC of the session, sent in `X-CSRF-Token` | No extra storage; SameSite=Lax is a second layer, not the only one |
+| D15 | 2026-11-13 | Argon2id at OWASP's minimum (19 MiB, t=2, p=1) | Stronger default memory settings (64 MiB) would let a burst of sign-ins exhaust the API's 512 MB limit |
+| D16 | 2026-11-13 | Row-level security with a transaction-local tenant setting plus an explicit "system" scope; the API connects as `agent_app` | Fails closed for any connection that does not state its scope; system work (webhooks, worker, sign-in) keeps working; owners and superusers would skip the policies |
+| D17 | 2026-11-13 | Another workspace answers 404, not 403 | Guessing workspace addresses or ids reveals nothing |
+| D18 | 2026-11-13 | New OWNER role, given at sign-up and to each existing workspace's first admin | Spec roles; only the owner deletes the workspace or invites admins |
+| D19 | 2026-11-13 | Unverified email addresses can sign in; a banner asks them to confirm | Publishing gates arrive in Phase 3; blocking sign-in would strand people whose email is delayed |
 
-- **The app connects to PostgreSQL as the database owner** (the `POSTGRES_USER` superuser in
-  the Docker image). Row-level security does not apply to superusers or table owners by
-  default, so RLS (spec Section 8) needs a separate non-owner application role, with
-  migrations still run as the owner.
-- `APP_SECRET_KEY` in the local `backend/.env` is 31 bytes; PyJWT warns below 32. Staging and
-  production already require 32+.
+## Notes
+
+- Account emails are sent during the request; a failure is logged and the person can ask
+  again. Move them to the worker queue when an SMTP provider is chosen.
+- `ACCESS_TOKEN_EXPIRE_MINUTES` is no longer used (sessions replaced tokens).

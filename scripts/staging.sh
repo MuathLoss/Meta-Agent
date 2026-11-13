@@ -3,15 +3,29 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 umask 077
 if [[ "${1:-}" == init ]]; then
-  if [[ -e .env.staging ]]; then echo 'Staging configuration already exists; kept unchanged.'; exit 0; fi
+  # Creates .env.staging, or adds any newly required secret to an existing one. Existing values
+  # are never changed.
   python3 - <<'PY'
 import base64, os, secrets
 from pathlib import Path
-p=Path('.env.staging')
-with p.open('x') as f:
- f.write('POSTGRES_PASSWORD='+secrets.token_hex(24)+'\nAPP_SECRET_KEY='+secrets.token_hex(32)+'\nTENANT_CHANNEL_SECRET_KEY='+base64.urlsafe_b64encode(os.urandom(32)).decode()+'\n')
+p = Path('.env.staging')
+wanted = {
+    'POSTGRES_PASSWORD': lambda: secrets.token_hex(24),
+    'APP_SECRET_KEY': lambda: secrets.token_hex(32),
+    'TENANT_CHANNEL_SECRET_KEY': lambda: base64.urlsafe_b64encode(os.urandom(32)).decode(),
+    'APP_DB_PASSWORD': lambda: secrets.token_hex(24),
+}
+existing = p.read_text() if p.exists() else ''
+present = {line.split('=', 1)[0] for line in existing.splitlines() if '=' in line}
+missing = [k for k in wanted if k not in present]
+if missing:
+    with p.open('a') as f:
+        if existing and not existing.endswith('\n'):
+            f.write('\n')
+        for key in missing:
+            f.write(f'{key}={wanted[key]()}\n')
 p.chmod(0o600)
-print('Created private local staging configuration.')
+print('Staging configuration ' + ('created' if not existing else f"updated: added {', '.join(missing)}" if missing else 'already complete; kept unchanged') + '.')
 PY
   exit 0
 fi

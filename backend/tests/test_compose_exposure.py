@@ -71,6 +71,19 @@ def test_staging_publishes_only_the_dashboard_on_localhost():
 
 
 @pytest.mark.parametrize("path", [PROD, STAGING], ids=["prod", "staging"])
+def test_api_and_worker_use_the_limited_database_login(path):
+    # Spec v1.2, Section 8: row-level security only binds a login that is not the table owner.
+    compose = yaml.safe_load(path.read_text())
+    app_url = compose["x-backend"]["environment"]["DATABASE_URL"]
+    migrate_url = compose["services"]["migrate"]["environment"]["DATABASE_URL"]
+    assert "agent_app" in app_url and "APP_DB_PASSWORD" in app_url
+    assert "agent_app" not in migrate_url and "POSTGRES_PASSWORD" in migrate_url
+    assert "setup_db_roles.py" in " ".join(compose["services"]["migrate"]["command"])
+    for name in ("backend", "worker"):
+        assert compose["services"][name]["environment"]["DATABASE_URL"] == app_url, f"{name} must use the limited login"
+
+
+@pytest.mark.parametrize("path", [PROD, STAGING], ids=["prod", "staging"])
 def test_product_scope_is_pinned_in_compose(path):
     environment = yaml.safe_load(path.read_text())["x-backend"]["environment"]
     assert environment["ENABLED_CHANNELS"] == "web_chat,whatsapp"

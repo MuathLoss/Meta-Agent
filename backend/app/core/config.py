@@ -42,6 +42,28 @@ class Settings(BaseSettings):
     # Private file storage (spec v1.2, T06). "local" keeps files on a backed-up volume.
     storage_backend: str = "local"
     storage_local_root: str = "./storage"
+    # Dashboard sign-in sessions (spec v1.2, Sections 10 and 13): an HttpOnly cookie that points
+    # at a server-side session, so signing out or resetting a password ends it at once.
+    session_idle_minutes: int = 480
+    session_max_days: int = 7
+    # None = automatic: Secure cookies everywhere except APP_ENV=development. Local staging over
+    # plain http://127.0.0.1 sets this to false.
+    session_cookie_secure: bool | None = None
+    # Account emails (verification, password reset, invitations). "log" writes the message,
+    # link included, to the API log: for development and local staging only.
+    account_email_provider: str = "log"
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_starttls: bool = True
+
+    @property
+    def session_cookie_secure_effective(self) -> bool:
+        if self.session_cookie_secure is not None:
+            return self.session_cookie_secure
+        return self.app_env.strip().lower() != "development"
 
     @property
     def enabled_channel_set(self) -> frozenset[str]:
@@ -111,6 +133,16 @@ class Settings(BaseSettings):
             errors.append("ENABLED_CHANNELS lists unknown channels: " + ", ".join(unknown))
         if self.storage_backend not in STORAGE_BACKENDS:
             errors.append("STORAGE_BACKEND must be one of: " + ", ".join(STORAGE_BACKENDS))
+        if self.account_email_provider not in {"log", "smtp"}:
+            errors.append("ACCOUNT_EMAIL_PROVIDER must be log or smtp")
+        # Staging runs on a developer's computer; production must be real.
+        if self.app_env.strip().lower() == "production":
+            if not self.session_cookie_secure_effective:
+                errors.append("SESSION_COOKIE_SECURE must be true in production")
+            if self.account_email_provider != "smtp":
+                errors.append("ACCOUNT_EMAIL_PROVIDER must be smtp in production")
+            elif not all(self.configured(v) for v in (self.smtp_host, self.smtp_from)):
+                errors.append("SMTP_HOST and SMTP_FROM must be set in production")
 
         return errors
 

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
-from app.core.db import get_db
+from app.core.db import get_db, system_scope
 from app.core.security import hash_password
 from app.core.tenancy import (
     ROLE_BROADCAST_OPERATOR,
@@ -63,7 +63,10 @@ def is_tenant_member(db: Session, tenant_id: int, user_id: int) -> bool:
 
 
 def is_member_of_another_tenant(db: Session, tenant_id: int, user_id: int) -> bool:
-    return db.query(TenantUserRole.id).filter(TenantUserRole.tenant_id != tenant_id, TenantUserRole.user_id == user_id).first() is not None
+    # Other workspaces are hidden by row-level security inside a tenant request; this yes/no
+    # check needs to see them, and returns nothing else about them.
+    with system_scope(db):
+        return db.query(TenantUserRole.id).filter(TenantUserRole.tenant_id != tenant_id, TenantUserRole.user_id == user_id).first() is not None
 
 
 def ensure_brand(db: Session, tenant_id: int) -> TenantBrand:

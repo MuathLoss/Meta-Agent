@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api import routes_auth, routes_onboarding, routes_channels, routes_dashboard, routes_broadcasts, routes_webhook, routes_config, routes_operations, routes_runtime, routes_uat, routes_deployment, routes_acceptance, routes_imports, routes_widget
+from app.api import routes_auth, routes_onboarding, routes_channels, routes_dashboard, routes_broadcasts, routes_webhook, routes_config, routes_operations, routes_runtime, routes_uat, routes_deployment, routes_acceptance, routes_imports, routes_team, routes_widget
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.core.features import channel_enabled, public_features, require_broadcasts_enabled, require_channel_route_enabled
@@ -61,6 +61,7 @@ app.add_middleware(
         "Content-Type",
         "Origin",
         "X-Tenant-Slug",
+        "X-CSRF-Token",
         "X-Support-Access-Reason",
         "X-Hub-Signature-256",
         "X-Requested-With",
@@ -93,6 +94,7 @@ def readiness():
     try:
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
+            body["row_level_security"] = row_level_security_status(db)
     except Exception:
         logger.warning("database readiness check failed: database_error")
         return JSONResponse(status_code=503, content={"status": "not_ready", "database": "error", "error": "database_unavailable"})
@@ -106,7 +108,20 @@ def readiness():
     if not queue_ok and settings.is_production_like:
         logger.warning("queue readiness check failed: redis_unreachable")
         return JSONResponse(status_code=503, content={**body, "status": "not_ready", "error": "queue_unavailable"})
+    # Spec v1.2, Section 8: on staging/production the API must not run as a database user that
+    # skips row-level security (a superuser, or the owner of the tables).
+    if body["row_level_security"] == "bypassed" and settings.is_production_like:
+        logger.error("database user bypasses row-level security; use the APP_DB_USER login")
+        return JSONResponse(status_code=503, content={**body, "status": "not_ready", "error": "row_level_security_bypassed"})
     return body
+
+
+def row_level_security_status(db) -> str:
+    if db.get_bind().dialect.name != "postgresql":
+        return "not_applicable"
+    role = db.execute(text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")).scalar()
+    owned = db.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tableowner = current_user")).scalar()
+    return "bypassed" if role or owned else "enforced"
 
 @app.get("/features")
 def features():
@@ -126,6 +141,7 @@ app.include_router(routes_runtime.router)
 app.include_router(routes_uat.router)
 app.include_router(routes_deployment.router)
 app.include_router(routes_imports.router)
+app.include_router(routes_team.router)
 app.include_router(routes_widget.router)
 
 app.include_router(routes_acceptance.router)

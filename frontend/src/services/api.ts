@@ -1,9 +1,12 @@
 export type Membership = { tenant_id: number; tenant_slug: string; tenant_name: string; roles: string[] };
+// The sign-in itself lives in an HttpOnly cookie the page cannot read (spec v1.2, Section 10).
+// csrf_token is not a credential: it is sent back on changing requests to prove they come from
+// this page, and is kept in memory only.
 export type SessionState = {
-  access_token: string;
-  token_type: string;
-  user: { id: number; email: string; full_name: string; is_platform_admin: boolean };
+  user: { id: number; email: string; full_name: string; is_platform_admin: boolean; email_verified: boolean };
   memberships: Membership[];
+  tenant_slug?: string | null;
+  csrf_token: string;
 };
 
 export type TenantProfile = {
@@ -230,15 +233,25 @@ function describeHttpFailure(status: number): string {
   return `Something went wrong (error ${status}). Please try again.`;
 }
 
+let csrfToken = '';
+export function setCsrfToken(value: string) { csrfToken = value || ''; }
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const headers = new Headers(options.headers || {});
-  if (!(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
-  if (options.tenantSlug) headers.set('X-Tenant-Slug', options.tenantSlug);
+  // `token` is no longer used: the browser sends the session cookie itself.
+  const { token: _unused, tenantSlug, ...init } = options;
+  void _unused;
+  const headers = new Headers(init.headers || {});
+  if (!(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+  if (tenantSlug) headers.set('X-Tenant-Slug', tenantSlug);
+  if (csrfToken && !SAFE_METHODS.has((init.method || 'GET').toUpperCase())) headers.set('X-CSRF-Token', csrfToken);
   const supportReason = sessionStorage.getItem('supportAccessReason');
-  if (options.token && supportReason) headers.set('X-Support-Access-Reason', supportReason);
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (tenantSlug && supportReason) headers.set('X-Support-Access-Reason', supportReason);
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: 'include' });
   if (!res.ok) {
+    // The session ended (signed out elsewhere, expired, or password changed): back to sign in.
+    if (res.status === 401 && path !== '/auth/me' && path !== '/auth/login') window.dispatchEvent(new Event('session-expired'));
     const text = await res.text();
     let detail: string | null = null;
     try {
@@ -257,7 +270,27 @@ export function login(email: string, password: string, tenantSlug: string) {
 export function signupBusiness(payload: { business_name: string; tenant_slug: string; admin_name: string; admin_email: string; admin_password: string; support_email?: string; support_phone?: string; timezone?: string; default_lang?: string }) {
   return request<SessionState>('/auth/signup-business', { method: 'POST', body: JSON.stringify(payload) });
 }
-export function getMe(token: string) { return request<SessionState['user'] & { memberships: Membership[] }>('/auth/me', { token }); }
+type MeResponse = SessionState['user'] & { memberships: Membership[]; tenant_slug?: string | null; csrf_token: string };
+// Returns the signed-in session from the cookie, or null when nobody is signed in.
+export async function restoreSession(): Promise<SessionState | null> {
+  try {
+    const me = await request<MeResponse>('/auth/me');
+    const { memberships, tenant_slug, csrf_token, ...user } = me;
+    return { user, memberships, tenant_slug, csrf_token };
+  } catch {
+    return null;
+  }
+}
+export function logoutSession() { return request<{ status: string }>('/auth/logout', { method: 'POST' }); }
+export function resendVerification() { return request<{ status: string }>('/auth/verify-email/resend', { method: 'POST' }); }
+export function verifyEmail(token: string) { return request<{ status: string }>('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) }); }
+export function requestPasswordReset(email: string) { return request<{ status: string }>('/auth/password-reset/request', { method: 'POST', body: JSON.stringify({ email }) }); }
+export function confirmPasswordReset(token: string, new_password: string) { return request<{ status: string }>('/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token, new_password }) }); }
+export function acceptInvite(token: string, password: string, full_name?: string) { return request<SessionState>('/auth/invites/accept', { method: 'POST', body: JSON.stringify({ token, password, full_name: full_name || undefined }) }); }
+export type TeamInvite = { id: number; email: string; role_code: string; status: string; expires_at: string; email_sent?: boolean };
+export function listInvites(tenantSlug: string) { return request<TeamInvite[]>('/tenants/current/invites', { tenantSlug }); }
+export function createInvite(tenantSlug: string, email: string, role_code: string) { return request<TeamInvite>('/tenants/current/invites', { method: 'POST', body: JSON.stringify({ email, role_code }), tenantSlug }); }
+export function revokeInvite(tenantSlug: string, id: number) { return request<TeamInvite>(`/tenants/current/invites/${id}`, { method: 'DELETE', tenantSlug }); }
 
 function auth(token: string, tenantSlug: string): Pick<ApiOptions, 'token' | 'tenantSlug'> { return { token, tenantSlug }; }
 

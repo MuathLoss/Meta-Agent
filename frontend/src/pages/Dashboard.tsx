@@ -1,4 +1,5 @@
 import { ChannelsPage } from './ChannelsPage';
+import { TeamInvites } from './TeamInvites';
 import { SmartImportStudio } from './SmartImportStudio';
 import { SetupGuide, WorkspaceHome } from './WorkspaceGuide';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
@@ -111,7 +112,8 @@ function looksLikeImageFile(file: File) {
 }
 
 export function Dashboard({ session, tenantSlug, onLogout }: Props) {
-  const token = session.access_token;
+  // Requests are signed in by the session cookie; this placeholder keeps the api.* signatures.
+  const token = 'cookie-session';
   const [tab, setTab] = useState<Tab>('overview');
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
   const [readiness, setReadiness] = useState<Readiness | null>(null);
@@ -361,7 +363,7 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
         <div className="sidebar-actions">
           <button className="secondary" onClick={refreshAll}>Refresh</button>
           <button className="secondary" onClick={onLogout}>Log out</button>
-          <button className="text-button danger" hidden={!canConfigure} onClick={() => { setDeleteAccountPassword(''); setConfirmDeleteAccount(true); }} disabled={deletingAccount}>Delete account</button>
+          <button className="text-button danger" hidden={!roles.includes('OWNER') || session.user.is_platform_admin} onClick={() => { setDeleteAccountPassword(''); setConfirmDeleteAccount(true); }} disabled={deletingAccount}>Delete account</button>
         </div>
       </aside>
       {session.user.is_platform_admin && devMenuOpen && devMenuPosition && <div className="dev-menu-overlay" onClick={() => setDevMenuOpen(false)}>
@@ -393,7 +395,7 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
           {tab === 'onboarding' && canConfigure && <SetupGuide tenant={tenant} readiness={readiness} onNavigate={selectTab} token={token} tenantSlug={tenantSlug} channels={channels} reload={refreshAll} />}
           {tab === 'inbox' && <Inbox rows={inbox} selectedConversationId={selectedConversationId} conversation={conversation} openConversation={openConversation} handoff={async (id) => { await api.handoff(token, tenantSlug, id); await openConversation(id); await refreshAll(); }} resolve={async (id) => { await api.resolve(token, tenantSlug, id); await openConversation(id); await refreshAll(); }} reopen={async (id) => { await api.reopen(token, tenantSlug, id); await openConversation(id); await refreshAll(); }} sendReply={async (id, text) => { await api.replyToConversation(token, tenantSlug, id, text); await openConversation(id); await refreshAll(); }} />}
           {tab === 'settings' && <Settings tenant={tenant} branches={branches} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
-          {tab === 'staff' && <Staff rows={staff} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
+          {tab === 'staff' && <><Staff rows={staff} token={token} tenantSlug={tenantSlug} reload={refreshAll} /><TeamInvites tenantSlug={tenantSlug} canInviteAdmins={session.user.is_platform_admin || roles.includes('OWNER')} /></>}
           {tab === 'knowledge' && <KnowledgeResponses faq={faq} intents={intents} routing={routing} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
           {tab === 'channels' && <ChannelsPage rows={channels} token={token} tenantSlug={tenantSlug} reload={refreshAll} enabledChannels={features.enabled_channels} />}
           {tab === 'tickets' && <Tickets rows={tickets} token={token} tenantSlug={tenantSlug} reload={refreshAll} openConversation={openConversation} />}

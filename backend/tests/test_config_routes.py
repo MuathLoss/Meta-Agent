@@ -35,7 +35,7 @@ from app.core.tenancy import ROLE_BUSINESS_ADMIN, ROLE_OPERATIONS_STAFF, require
 from app.models.entities import AuditLog, FaqItem, IntentDefinition, IntentKeyword, RoutingRule, Tenant, TenantUserRole, TrainingExample, User
 from app.schemas.auth import LoginRequest
 from app.services.response_engine import ResponseEngine
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from pydantic import ValidationError
 import pytest
 
@@ -376,10 +376,11 @@ def test_created_staff_can_login_with_explicit_password(db, tenant):
     response = login(
         LoginRequest(email="staff-login@example.com", password="StaffLogin123!", tenant_slug=tenant.slug),
         request=FakeRequest(),
+        response=Response(),
         db=db,
     )
 
-    assert response.access_token
+    assert response.csrf_token
     assert response.user["email"] == "staff-login@example.com"
 
 

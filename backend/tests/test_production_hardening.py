@@ -62,6 +62,9 @@ def test_short_production_secret_is_rejected_without_revealing_it():
             app_secret_key=secret,
             database_url="postgresql+psycopg://user:pass@db.internal/app",
             tenant_channel_secret_key="real-tenant-channel-secret",
+            account_email_provider="smtp",
+            smtp_host="smtp.example.test",
+            smtp_from="no-reply@example.test",
         ).production_config_errors()
 
     short_errors = errors_for("short-but-real-secret")

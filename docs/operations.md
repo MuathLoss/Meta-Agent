@@ -25,6 +25,20 @@ docker compose --env-file .env.staging -f docker-compose.staging.yml up -d
 The first start after the Phase 0 change builds `infra/postgres` (PostgreSQL + pgvector) and
 runs migration `20261113_0008`.
 
+After the Phase 1 change, run `scripts/staging.sh init` once more: it adds `APP_DB_PASSWORD`
+(the limited database login the API uses) to the existing `.env.staging` without touching the
+other values. Then start as usual; the migrate service creates the login.
+
+**Account emails on staging** (verification, password reset, invitations) are not sent; they
+are written to the API log. Find the link with:
+
+```bash
+docker compose --env-file .env.staging -f docker-compose.staging.yml logs backend | grep -E "verify_email=|reset_password=|invite="
+```
+
+Replace `localhost` with `127.0.0.1` in the link if the browser is open on `127.0.0.1`
+(the session cookie belongs to the address you signed in on).
+
 ## Tests
 
 ```bash
@@ -41,7 +55,7 @@ the frontend type check/build and `npm audit`.
 | Check | Healthy answer |
 |---|---|
 | `GET /api/health` | `{"status": "ok"}` (process is up) |
-| `GET /api/health/ready` | `"status": "ready"`, `"database": "ok"`, `"queue": "ok"`, `"worker": "ok"` |
+| `GET /api/health/ready` | `"status": "ready"`, `"database": "ok"`, `"row_level_security": "enforced"`, `"queue": "ok"`, `"worker": "ok"` |
 | `GET /api/features` | `{"enabled_channels": ["web_chat", "whatsapp"], "broadcasts": false}` |
 
 `worker` reads `unknown` for up to a minute after start (first heartbeat) and `stale` if the

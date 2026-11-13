@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { login, signupBusiness, type SessionState } from '../services/api';
 
-type Props = { onLogin: (session: SessionState, tenantSlug: string) => void };
-export function LoginPage({ onLogin }: Props) {
+type Props = { onLogin: (session: SessionState, tenantSlug: string) => void; onForgotPassword: () => void };
+export function LoginPage({ onLogin, onForgotPassword }: Props) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -57,6 +57,7 @@ export function LoginPage({ onLogin }: Props) {
           {mode === 'signup' ? <label>Workspace address<input required value={tenantSlug} onChange={e => {setSlugEdited(true); setTenantSlug(e.target.value.toLowerCase());}} placeholder="your-business" /><small className="field-hint">A short, unique name for your workspace. Use English letters.</small></label> : <details className="quiet-details"><summary>Need a specific workspace?</summary><label>Workspace address<input value={tenantSlug} onChange={e => setTenantSlug(e.target.value.toLowerCase())} placeholder="Optional" /><small className="field-hint">Leave blank to open your default workspace.</small></label></details>}
           {error && <div className="error-box" role="alert">{error}</div>}
           <button className="welcome-submit" disabled={loading}>{loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create my workspace'}</button>
+          {mode === 'login' && <button type="button" className="text-button" onClick={onForgotPassword}>Forgot your password?</button>}
         </form>
       </section>
     </div>

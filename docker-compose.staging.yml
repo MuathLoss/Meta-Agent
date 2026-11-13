@@ -10,7 +10,12 @@ x-backend: &backend
   env_file: .env.staging
   environment: &environment
     APP_ENV: staging
-    DATABASE_URL: postgresql+psycopg://agent_staging:${POSTGRES_PASSWORD:?Run staging.sh init first}@postgres:5432/agent_staging
+    # The API and worker use the limited login that row-level security applies to (spec v1.2,
+    # Section 8). Only the migrate service uses the database owner.
+    DATABASE_URL: postgresql+psycopg://agent_app:${APP_DB_PASSWORD:?Run scripts/staging.sh init again}@postgres:5432/agent_staging
+    # Plain http on this computer, so the session cookie cannot be marked Secure here.
+    SESSION_COOKIE_SECURE: 'false'
+    ACCOUNT_EMAIL_PROVIDER: log
     REDIS_URL: redis://redis:6379/0
     STORAGE_BACKEND: local
     STORAGE_LOCAL_ROOT: /app/storage
@@ -58,7 +63,13 @@ services:
     logging: *logging
   migrate:
     <<: *backend
-    command: [python, -m, alembic, upgrade, head]
+    environment:
+      <<: *environment
+      DATABASE_URL: postgresql+psycopg://agent_staging:${POSTGRES_PASSWORD:?Run staging.sh init first}@postgres:5432/agent_staging
+      APP_DB_USER: agent_app
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+    # Migrations as the owner, then create/update the limited login the API uses.
+    command: [sh, -c, 'python -m alembic upgrade head && python scripts/setup_db_roles.py']
     depends_on:
       postgres: {condition: service_healthy}
     restart: 'no'

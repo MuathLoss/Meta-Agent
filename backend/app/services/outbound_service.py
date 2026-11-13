@@ -6,6 +6,7 @@ from uuid import uuid4
 import httpx
 from sqlalchemy.orm import Session
 
+from app.core.features import channel_enabled
 from app.core.redaction import redact_sensitive
 from app.models.entities import ChannelConfig, Message
 from app.services.dry_run_context import dry_run_outbound_enabled
@@ -39,6 +40,8 @@ class OutboundService:
     def channel_ready(self, channel: ChannelConfig) -> tuple[bool, str | None]:
         if not self.supports_channel(channel.channel_type):
             return False, "unsupported_channel"
+        if not channel_enabled(channel.channel_type):
+            return False, "channel_not_in_product"
 
         public_config = channel.public_config_json or {}
         if public_config.get("enabled") is False:

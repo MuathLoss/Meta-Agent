@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -11,6 +11,9 @@ from sqlalchemy import text
 from app.api import routes_auth, routes_onboarding, routes_channels, routes_dashboard, routes_broadcasts, routes_webhook, routes_config, routes_operations, routes_runtime, routes_uat, routes_deployment, routes_acceptance, routes_imports, routes_widget
 from app.core.config import settings
 from app.core.db import SessionLocal
+from app.core.features import channel_enabled, public_features, require_broadcasts_enabled, require_channel_route_enabled
+from app.jobs.periodic import worker_heartbeat_age_seconds
+from app.jobs.queue import redis_reachable
 from app.services.email_polling_scheduler import EmailPollingBackgroundTask
 
 logger = logging.getLogger(__name__)
@@ -21,7 +24,7 @@ email_polling_task: EmailPollingBackgroundTask | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global email_polling_task
-    if settings.email_polling_enabled:
+    if settings.email_polling_enabled and channel_enabled("email"):
         email_polling_task = EmailPollingBackgroundTask()
         email_polling_task.start()
         logger.info("email polling background task started", extra={"interval_seconds": settings.email_poll_interval_seconds})
@@ -86,20 +89,37 @@ def health():
 
 @app.get("/health/ready")
 def readiness():
+    body: dict = {"status": "ready", "database": "ok"}
     try:
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-        return {"status": "ready", "database": "ok"}
     except Exception:
         logger.warning("database readiness check failed: database_error")
         return JSONResponse(status_code=503, content={"status": "not_ready", "database": "error", "error": "database_unavailable"})
 
+    # The job queue is required on staging/production. Locally the API still starts without it.
+    queue_ok = redis_reachable()
+    body["queue"] = "ok" if queue_ok else "error"
+    # Reported for monitoring only: a stopped worker must not take the API down with it.
+    age = worker_heartbeat_age_seconds() if queue_ok else None
+    body["worker"] = "unknown" if age is None else ("ok" if age <= max(settings.worker_heartbeat_seconds, 10) * 3 else "stale")
+    if not queue_ok and settings.is_production_like:
+        logger.warning("queue readiness check failed: redis_unreachable")
+        return JSONResponse(status_code=503, content={**body, "status": "not_ready", "error": "queue_unavailable"})
+    return body
+
+@app.get("/features")
+def features():
+    return public_features()
+
+# Switched-off channels and broadcasts answer 404 (spec v1.2, Section 2.1).
+channel_scope = [Depends(require_channel_route_enabled)]
 app.include_router(routes_auth.router)
 app.include_router(routes_onboarding.router)
-app.include_router(routes_channels.router)
+app.include_router(routes_channels.router, dependencies=channel_scope)
 app.include_router(routes_dashboard.router)
-app.include_router(routes_broadcasts.router)
-app.include_router(routes_webhook.router)
+app.include_router(routes_broadcasts.router, dependencies=[Depends(require_broadcasts_enabled)])
+app.include_router(routes_webhook.router, dependencies=channel_scope)
 app.include_router(routes_config.router)
 app.include_router(routes_operations.router)
 app.include_router(routes_runtime.router)

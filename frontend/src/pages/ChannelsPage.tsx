@@ -18,8 +18,12 @@ const definitions: Record<string, {name: string; intro: string; fields: Field[];
 };
 const emailExtras: Field[] = [{key:'smtp_port',label:'SMTP port',hint:'587 for STARTTLS, or 465 for SSL',optional:true},{key:'smtp_from_name',label:'Sender name',optional:true},{key:'imap_port',label:'IMAP port',hint:'Usually 993',optional:true},{key:'imap_mailbox',label:'Mailbox',hint:'Defaults to INBOX',optional:true},{key:'inbound_webhook_secret',label:'Inbound test secret',secret:true,optional:true}];
 
-export function ChannelsPage({rows,token,tenantSlug,reload}:{rows:Channel[];token:string;tenantSlug:string;reload:()=>Promise<void>}) {
-  const [kind,setKind]=useState('telegram');
+export function ChannelsPage({rows,token,tenantSlug,reload,enabledChannels}:{rows:Channel[];token:string;tenantSlug:string;reload:()=>Promise<void>;enabledChannels:string[]}) {
+  // Only channels switched on for this product are offered (spec v1.2, Section 2.1).
+  const available=Object.entries(definitions).filter(([key])=>enabledChannels.includes(key));
+  const firstChoice=enabledChannels.includes('whatsapp')?'whatsapp':available[0]?.[0]||'web_chat';
+  const [kind,setKind]=useState(firstChoice);
+  useEffect(()=>{if(!enabledChannels.includes(kind))setKind(firstChoice);},[enabledChannels,kind,firstChoice]);
   const [health,setHealth]=useState<ChannelHealth[]>([]);
   const [values,setValues]=useState<Record<string,string>>({});
   const [enabled,setEnabled]=useState(true);
@@ -50,7 +54,7 @@ export function ChannelsPage({rows,token,tenantSlug,reload}:{rows:Channel[];toke
   async function testReply(e:FormEvent){e.preventDefault();setBusy('test');setError(null);try{setTest(await api.testChannel(token,tenantSlug,{channel_type:kind,message}));}catch(e){setError(e instanceof Error?e.message:'Could not run this test.');}finally{setBusy(null);}}
   return <section className="channel-workspace">
     <header className="workspace-page-heading"><div><p className="eyebrow">Connect with customers</p><h2>Your channels</h2><p className="muted">Start with one channel. Save its details, check the connection, then try an answer.</p></div></header>
-    <div className="channel-picker-cards" aria-label="Choose a channel">{Object.entries(definitions).map(([key,info])=>{const h=health.find(c=>c.channel_type===key);return <button type="button" className={kind===key?'selected':'secondary'} aria-pressed={kind===key} key={key} onClick={()=>choose(key)} disabled={!!busy}><strong>{info.name}</strong><small>{h?.verification?.status==='credentials_verified'?'Connection checked':h?.ready?'Details saved':'Needs setup'}</small></button>;})}</div>
+    <div className="channel-picker-cards" aria-label="Choose a channel">{available.map(([key,info])=>{const h=health.find(c=>c.channel_type===key);return <button type="button" className={kind===key?'selected':'secondary'} aria-pressed={kind===key} key={key} onClick={()=>choose(key)} disabled={!!busy}><strong>{info.name}</strong><small>{h?.verification?.status==='credentials_verified'?'Connection checked':h?.ready?'Details saved':'Needs setup'}</small></button>;})}</div>
     {error&&<div className="error-box" role="alert">{error}</div>}{notice&&<div className="connection-check" role="status">{notice}</div>}
     <div className="channel-setup-layout">
       <form className="card form-stack" onSubmit={save}>

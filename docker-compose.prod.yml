@@ -1,0 +1,182 @@
+name: agent-sw
+# Production / pilot server: one Linux VPS, about 4 vCPU / 8 GB RAM / 100 GB disk (spec v1.2, 14.1).
+# Start: docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+# Only Caddy publishes ports (80/443). PostgreSQL and Redis sit on an internal network with no
+# internet access and no published ports.
+#
+# Memory limits add up to about 3.3 GB, leaving the rest of 8 GB for the Linux page cache,
+# PostgreSQL's file cache and short spikes. Change them only after measuring (docs/vps-sizing.md).
+x-logging: &logging
+  driver: json-file
+  options: {max-size: 10m, max-file: '3'}
+x-backend: &backend
+  build: ./backend
+  image: agent-sw-backend:${APP_VERSION:-latest}
+  env_file: .env.production
+  environment: &environment
+    APP_ENV: production
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}@postgres:5432/${POSTGRES_DB:-agent}
+    REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
+    STORAGE_BACKEND: local
+    STORAGE_LOCAL_ROOT: /app/storage
+    CORS_ALLOWED_ORIGINS: https://${APP_DOMAIN:?set APP_DOMAIN in .env.production}
+    FRONTEND_URL: https://${APP_DOMAIN}
+    ALLOW_UNSIGNED_WEBHOOKS_IN_DEV: 'false'
+    EMAIL_POLLING_ENABLED: 'false'
+    OLLAMA_ENABLED: 'false'
+    ENABLED_CHANNELS: web_chat,whatsapp
+    BROADCASTS_ENABLED: 'false'
+    # Trust forwarded visitor addresses only from Caddy's network.
+    FORWARDED_ALLOW_IPS: ${EDGE_SUBNET:-172.29.10.0/24}
+  logging: *logging
+  restart: unless-stopped
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env.production}
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on:
+      backend: {condition: service_healthy}
+      frontend: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:2019/config/]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy: {resources: {limits: {cpus: '0.50', memory: 128m}}}
+    logging: *logging
+    restart: unless-stopped
+
+  frontend:
+    # Static dashboard and widget files served by a small nginx; no Node.js at runtime (T01).
+    build: ./frontend
+    image: agent-sw-frontend:${APP_VERSION:-latest}
+    networks: [edge]
+    # nginx looks up "backend" when it starts, so the backend container must exist first.
+    depends_on:
+      backend: {condition: service_started}
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1/]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy: {resources: {limits: {cpus: '0.25', memory: 64m}}}
+    logging: *logging
+    restart: unless-stopped
+
+  backend:
+    <<: *backend
+    volumes: [uploads:/app/uploads, app_storage:/app/storage]
+    networks: [edge, data]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health/ready",timeout=3)']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # One API process (spec v1.2, 14.1). Raise only after measuring.
+    deploy: {resources: {limits: {cpus: '1.0', memory: 512m}}}
+
+  worker:
+    <<: *backend
+    command: [python, scripts/run_worker.py]
+    volumes: [uploads:/app/uploads, app_storage:/app/storage]
+    # Needs the internet later for Gemini and Meta, so it is on the edge network too.
+    networks: [edge, data]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, 'import sys; from app.jobs.periodic import worker_heartbeat_age_seconds as age; a = age(); sys.exit(0 if a is not None and a < 180 else 1)']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    # One worker, one job at a time (spec v1.2, 14.1). Document parsing will need the headroom.
+    deploy: {resources: {limits: {cpus: '1.0', memory: 768m}}}
+
+  migrate:
+    <<: *backend
+    command: [python, -m, alembic, upgrade, head]
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: 'no'
+
+  postgres:
+    # Official PostgreSQL 16 plus pgvector; see infra/postgres/Dockerfile for why not pgvector/pgvector.
+    build: ./infra/postgres
+    image: agent-sw-postgres:16.15-pgvector0.8
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent}
+      POSTGRES_USER: ${POSTGRES_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Sized for a 1.5 GB container on an 8 GB server; see docs/vps-sizing.md.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=384MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=40
+    shm_size: 256m
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy: {resources: {limits: {cpus: '2.0', memory: 1536m}}}
+    logging: *logging
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    # Queue only: never evict jobs; append-only file so queued jobs survive a restart.
+    command: [sh, -c, 'exec redis-server --appendonly yes --maxmemory 192mb --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes: [redis_data:/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy: {resources: {limits: {cpus: '0.50', memory: 256m}}}
+    logging: *logging
+    restart: unless-stopped
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.29.10.0/24}
+  data:
+    # No internet access and no route from Caddy: only the API, worker and migrations reach it.
+    internal: true
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:
+  redis_data:
+  uploads:
+  app_storage:

@@ -4,6 +4,7 @@ from secrets import token_urlsafe
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.db import get_db
+from app.core.features import channel_enabled
 from app.core.rate_limit import enforce_rate_limit
 from app.core.tenancy import ROLE_BUSINESS_ADMIN, get_current_tenant, require_tenant_roles
 from app.models.entities import Tenant
@@ -31,7 +32,7 @@ def ser(r):
 
 @router.get("")
 def list_channels(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(ROLE_BUSINESS_ADMIN))):
-    return [ser(r) for r in service.list(db, tenant.id)]
+    return [ser(r) for r in service.list(db, tenant.id) if channel_enabled(r.channel_type)]
 
 @router.put("/{channel_type}/settings", response_model=ChannelConfigResponse)
 def update(channel_type: str, payload: ChannelConfigRequest, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(ROLE_BUSINESS_ADMIN))):
@@ -71,7 +72,7 @@ def test_console_message(
     _: dict = Depends(require_tenant_roles(ROLE_BUSINESS_ADMIN)),
 ):
     channel_type = payload.channel_type.strip().lower()
-    if channel_type not in TESTABLE_CHANNELS:
+    if channel_type not in TESTABLE_CHANNELS or not channel_enabled(channel_type):
         raise HTTPException(status_code=400, detail="Channel is not implemented for test console")
     channel = service.get(db, tenant.id, channel_type)
     ready, reason = _test_channel_ready(channel)
@@ -147,7 +148,7 @@ def poll_email_once(tenant_slug: str, db: Session = Depends(get_db), tenant: Ten
 def channel_readiness(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), _: dict = Depends(require_tenant_roles(ROLE_BUSINESS_ADMIN))):
     from app.services.channel_health_service import readiness, REQUIRED
     rows = {r.channel_type: r for r in service.list(db, tenant.id)}
-    return [readiness(rows.get(kind), kind) for kind in REQUIRED]
+    return [readiness(rows.get(kind), kind) for kind in REQUIRED if channel_enabled(kind)]
 
 
 @router.post("/{channel_type}/verify")

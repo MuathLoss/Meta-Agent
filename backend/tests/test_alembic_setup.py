@@ -12,7 +12,7 @@ def test_alembic_has_one_head_and_metadata_loads():
     config = Config(str(backend_dir / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["20260910_0007"]
+    assert script.get_heads() == ["20261113_0008"]
     assert len(Base.metadata.tables) == 21
     assert "tenants" in Base.metadata.tables
     assert "webhook_events" in Base.metadata.tables
@@ -174,6 +174,23 @@ def test_channel_config_routing_keys_revision_follows_composite_relationships():
         "ix_channel_configs_tenant_type_provider_channel",
         "ix_channel_configs_type_status_provider_channel",
     }
+
+
+def test_pgvector_revision_follows_import_jobs_and_is_reversible():
+    backend_dir = Path(__file__).resolve().parents[1]
+    revision_path = backend_dir / "migrations" / "versions" / "20261113_0008_pgvector_extension.py"
+    source = revision_path.read_text()
+    spec = spec_from_file_location("pgvector_revision", revision_path)
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.revision == "20261113_0008"
+    assert module.down_revision == "20260910_0007"
+    assert "CREATE EXTENSION IF NOT EXISTS vector" in source
+    assert "DROP EXTENSION IF EXISTS vector" in source
 
 
 def test_channel_config_model_has_routing_key_columns_and_indexes():

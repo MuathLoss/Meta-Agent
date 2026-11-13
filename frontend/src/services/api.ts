@@ -266,7 +266,11 @@ export type ImportJob = ImportJobSummary & {preview: SmartImportPreview | null; 
 export type ImportDraft = {title: string; source_type: string; revision?: number; preview: SmartImportPreview; rows: SmartImportRow[]};
 export type ImportGrouping = {assisted: boolean; message: string; groups: Array<{label: string; row_ids: string[]}>};
 export type ChannelHealth = {channel_type: string; ready: boolean; checks: Array<{key: string; label: string; passed: boolean}>; missing: string[]; automatic_polling?: boolean | null; verification?: {status: string; message: string; checked_at?: string} | null};
+// Which parts of the product are switched on (spec v1.2, Section 2.1). Public and not secret.
+export type Features = {enabled_channels: string[]; broadcasts: boolean};
+export const V1_FEATURES: Features = {enabled_channels: ['web_chat', 'whatsapp'], broadcasts: false};
 export const api = {
+  features: () => request<Features>('/features'),
   importJobs: (token: string, tenantSlug: string) => request<ImportJobSummary[]>('/imports/smart/jobs', auth(token, tenantSlug)),
   importJob: (token: string, tenantSlug: string, id: number) => request<ImportJob>(`/imports/smart/jobs/${id}`, auth(token, tenantSlug)),
   createImportJob: (token: string, tenantSlug: string, data: ImportDraft) => request<ImportJob>('/imports/smart/jobs', {method: 'POST', body: JSON.stringify(data), ...auth(token, tenantSlug)}),

@@ -15,8 +15,17 @@ from app.models.entities import (
     RoutingRule,
     Tenant,
 )
+from app.core.config import KNOWN_CHANNELS, settings
 from app.core.rate_limit import reset_rate_limits
 from app.services.tenant_channel_service import TenantChannelService
+
+
+@pytest.fixture(autouse=True)
+def all_agent_sw_features_on(monkeypatch):
+    # The existing suite keeps covering every Agent SW channel and broadcasts. The product
+    # defaults (V1 channels only, broadcasts off) are covered in test_product_scope.py.
+    monkeypatch.setattr(settings, "enabled_channels", ",".join(KNOWN_CHANNELS))
+    monkeypatch.setattr(settings, "broadcasts_enabled", True)
 
 
 @pytest.fixture(autouse=True)

@@ -1,0 +1,30 @@
+# TLS and routing for the pilot server (spec v1.2, T11). APP_DOMAIN and ACME_EMAIL come
+# from .env.production; Caddy gets and renews the certificate automatically.
+{
+	email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	# Largest upload is 10 MB (MAX_FILE_SIZE_MB); leave room for form overhead.
+	request_body {
+		max_size 12MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+
+	# API, website widget and Meta webhooks: https://APP_DOMAIN/api/...
+	handle_path /api/* {
+		reverse_proxy backend:8000
+	}
+
+	# Dashboard and static files.
+	handle {
+		reverse_proxy frontend:80
+	}
+}

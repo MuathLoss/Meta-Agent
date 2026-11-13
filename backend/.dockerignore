@@ -7,3 +7,4 @@ uploads
 *.db
 *.sqlite*
 tests
+storage

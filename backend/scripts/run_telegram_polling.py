@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.core.config import settings
 from app.core.db import SessionLocal
 from app.services.telegram_polling_service import TelegramPollingService
 
@@ -50,6 +51,10 @@ def main() -> None:
     parser.add_argument("--interval", type=float, default=2.0, help="Seconds to sleep between polling iterations in loop mode.")
     parser.add_argument("--keep-webhook", action="store_true", help="Do not disable Telegram webhook before polling.")
     args = parser.parse_args()
+
+    if not settings.channel_enabled("telegram"):
+        print({"status": "skipped", "reason": "telegram is not in ENABLED_CHANNELS"}, flush=True)
+        return
 
     disable_webhook = not args.keep_webhook
     if not args.loop:

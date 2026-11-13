@@ -7,10 +7,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip==26.3 \
     && pip install --no-cache-dir -r requirements.txt
 COPY . .
-# Run as an unprivileged user. Only the uploads folder is writable.
+# Run as an unprivileged user. Only the uploads and private storage folders are writable.
 RUN useradd --system --uid 10001 --user-group --home-dir /app --shell /usr/sbin/nologin app \
-    && mkdir -p /app/uploads \
-    && chown -R app:app /app/uploads
+    && mkdir -p /app/uploads /app/storage \
+    && chown -R app:app /app/uploads /app/storage \
+    && chmod 700 /app/storage
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

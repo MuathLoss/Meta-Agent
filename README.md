@@ -1,5 +1,12 @@
 # Configurable Multi-Tenant Business Agent Platform
 
+> **Current direction (2026-11-13):** this codebase is being evolved into the Institution AI
+> Chatbot SaaS described in spec v1.2 (website widget + WhatsApp, knowledge answers from each
+> institution's own documents). Start with `docs/operations.md` (run and test),
+> `docs/architecture.md`, `docs/decisions.md` and `docs/remaining-launch-blockers.md`.
+> Broadcasts, Ollama, Telegram, email and Meta social channels are switched off for this
+> product; the sections below describe the original platform.
+
 Production-bound rebuild for a configurable multi-tenant business agent platform.
 
 - Academy = Tenant #1 only.

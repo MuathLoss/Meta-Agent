@@ -28,7 +28,7 @@ case "${1:-status}" in
     archive=".staging-backups/database-$(date -u +%Y%m%dT%H%M%SZ).dump"
     "${compose[@]}" exec -T postgres pg_dump -U agent_staging -d agent_staging -Fc > "$archive.partial"
     mv "$archive.partial" "$archive"
-    "${compose[@]}" run --rm --no-deps -T --entrypoint tar backend czf - -C /app uploads > "${archive%.dump}-uploads.tar.gz"
+    "${compose[@]}" run --rm --no-deps -T --entrypoint tar backend czf - -C /app uploads storage > "${archive%.dump}-files.tar.gz"
     echo "Database backup: $archive. Keep .env.staging in a secure backup too; it holds the encryption key."
     ;;
   restore-check)

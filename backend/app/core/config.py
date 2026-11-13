@@ -5,6 +5,11 @@ PRODUCTION_ENVS = {"production", "staging"}
 PLACEHOLDER_MARKERS = ("changeme", "replace-me", "replace-with", "pending")
 # Sign-in tokens are signed with HMAC-SHA256; a shorter key can be guessed offline.
 MIN_APP_SECRET_KEY_LENGTH = 32
+# Every channel the code can talk to. The product (spec v1.2, P06) sells only the first two;
+# the rest stay in the code but are off unless ENABLED_CHANNELS lists them.
+KNOWN_CHANNELS = ("web_chat", "whatsapp", "telegram", "email", "instagram", "facebook")
+V1_CHANNELS = ("web_chat", "whatsapp")
+STORAGE_BACKENDS = ("local",)
 
 
 class Settings(BaseSettings):
@@ -27,6 +32,24 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "gemma4:e4b"
     ollama_timeout_seconds: int = 10
+    # Product scope (spec v1.2, Section 2.1).
+    enabled_channels: str = ",".join(V1_CHANNELS)
+    broadcasts_enabled: bool = False
+    # Background jobs (spec v1.2, T07). Redis holds the queue only, never billing or usage state.
+    redis_url: str = "redis://localhost:6379/0"
+    worker_queue_name: str = "default"
+    worker_heartbeat_seconds: int = 60
+    # Private file storage (spec v1.2, T06). "local" keeps files on a backed-up volume.
+    storage_backend: str = "local"
+    storage_local_root: str = "./storage"
+
+    @property
+    def enabled_channel_set(self) -> frozenset[str]:
+        # Read on every call (not cached) so a changed setting takes effect without a restart in tests.
+        return frozenset(x.strip().lower() for x in self.enabled_channels.split(",") if x.strip())
+
+    def channel_enabled(self, channel_type: str | None) -> bool:
+        return (channel_type or "").strip().lower() in self.enabled_channel_set
 
     @cached_property
     def cors_allowed_origins_list(self) -> list[str]:
@@ -77,6 +100,17 @@ class Settings(BaseSettings):
             self.cors_allowed_origins_list
         except ValueError as exc:
             errors.append(str(exc))
+
+        # Spec v1.2 acceptance criterion 16: these stay off in the production configuration.
+        if self.broadcasts_enabled:
+            errors.append("BROADCASTS_ENABLED must be false: bulk WhatsApp messaging is outside the product and Meta policy")
+        if self.ollama_enabled:
+            errors.append("OLLAMA_ENABLED must be false: a local model does not fit the pilot server")
+        unknown = sorted(self.enabled_channel_set - set(KNOWN_CHANNELS))
+        if unknown:
+            errors.append("ENABLED_CHANNELS lists unknown channels: " + ", ".join(unknown))
+        if self.storage_backend not in STORAGE_BACKENDS:
+            errors.append("STORAGE_BACKEND must be one of: " + ", ".join(STORAGE_BACKENDS))
 
         return errors
 

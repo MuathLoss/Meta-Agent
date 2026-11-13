@@ -5,6 +5,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent
 import { createPortal } from 'react-dom';
 import {
   api,
+  V1_FEATURES,
+  type Features,
   resolveAssetUrl,
   type Analytics,
   type Branch,
@@ -124,6 +126,8 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
+  // Starts at the product defaults so switched-off parts never flash on screen.
+  const [features, setFeatures] = useState<Features>(V1_FEATURES);
   const [audit, setAudit] = useState<Array<{ id: number; action: string; entity_type: string; entity_id?: string | null; created_at?: string | null }>>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   const [conversation, setConversation] = useState<ConversationDetail | null>(null);
@@ -154,7 +158,7 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   const roles = session.memberships.find(m => m.tenant_slug === tenantSlug)?.roles || [];
   const canConfigure = session.user.is_platform_admin || roles.includes('BUSINESS_ADMIN');
   const canOperate = canConfigure || roles.some(r => ['OPERATIONS_STAFF', 'FINANCE', 'CERTIFICATES', 'SUPERVISOR'].includes(r));
-  const canBroadcast = canConfigure || roles.includes('BROADCAST_OPERATOR');
+  const canBroadcast = features.broadcasts && (canConfigure || roles.includes('BROADCAST_OPERATOR'));
   const primaryTabs = tabs.filter(t => (canOperate && ['overview', 'inbox', 'tickets', 'customers'].includes(t.key)) || (canBroadcast && t.key === 'broadcasts'));
   const workspaceTabs = canConfigure ? tabs.filter(t => ['onboarding', 'knowledge', 'channels', 'staff', 'settings'].includes(t.key)) : [];
   const systemTabs = canConfigure ? tabs.filter(t => t.key === 'audit') : [];
@@ -256,6 +260,9 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
   }
 
   useEffect(() => { void refreshAll(); }, []);
+  useEffect(() => { void api.features().then(setFeatures).catch(() => setFeatures(V1_FEATURES)); }, []);
+  // Broadcasts are fetched only when switched on; load them once the switch is known.
+  useEffect(() => { if (features.broadcasts) void refreshAll(); }, [features.broadcasts]);
   useEffect(() => { if (tab === 'audit') void loadAudit(); }, [tab]);
   useEffect(() => {
     if (tab !== 'dev') setDevMenuOpen(false);
@@ -388,7 +395,7 @@ export function Dashboard({ session, tenantSlug, onLogout }: Props) {
           {tab === 'settings' && <Settings tenant={tenant} branches={branches} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
           {tab === 'staff' && <Staff rows={staff} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
           {tab === 'knowledge' && <KnowledgeResponses faq={faq} intents={intents} routing={routing} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
-          {tab === 'channels' && <ChannelsPage rows={channels} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}
+          {tab === 'channels' && <ChannelsPage rows={channels} token={token} tenantSlug={tenantSlug} reload={refreshAll} enabledChannels={features.enabled_channels} />}
           {tab === 'tickets' && <Tickets rows={tickets} token={token} tenantSlug={tenantSlug} reload={refreshAll} openConversation={openConversation} />}
           {tab === 'customers' && <Customers rows={customers} />}
           {tab === 'broadcasts' && <Broadcasts rows={broadcasts} token={token} tenantSlug={tenantSlug} reload={refreshAll} />}

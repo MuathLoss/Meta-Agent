@@ -3,7 +3,10 @@ __pycache__/
 .pytest_cache/
 .env
 .env.*
+!.env.example
 *.pyc
+# Local private file storage (STORAGE_LOCAL_ROOT in development)
+backend/storage/
 .DS_Store
 node_modules/
 dist/
